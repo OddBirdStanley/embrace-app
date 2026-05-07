@@ -1,6 +1,7 @@
 import bleak
 import asyncio
 import time
+from collections import deque
 from PySide6.QtCore import QThread, Signal, Slot
 from threading import Lock
 
@@ -31,18 +32,27 @@ class BLEDiscover(QThread):
 class BLEConnection(QThread):
     connected = Signal(int)
     cleanup_complete = Signal(int)
+    deposit = Signal(int)
+    stop = Signal()
 
-    def __init__(self, parent, address):
+    def __init__(self, address):
         super().__init__()
 
-        self.parent = parent
-        self.parent.ble_cleanup.connect(self.cleanup)
+        self.stop.connect(self.cleanup)
         self.address = address
         self.client = None
         self.alive = True
         self.has_error = False
+        self.q = deque()
         self.lock = Lock()
         self.destroyed.connect(self.cleanup)
+        self.deposit.connect(self.handle_deposit)
+    
+    @Slot(int)
+    def handle(self, i):
+        self.lock.acquire()
+        self.q.append(i)
+        self.lock.release()
     
     @Slot()
     def cleanup(self):
@@ -50,7 +60,10 @@ class BLEConnection(QThread):
             asyncio.run(self.client.disconnect())
         except:
             pass
+        self.lock.acquire()
+        self.alive = False
         self.cleanup_complete.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)
+        self.lock.release()
 
     def run(self):
         # connect to BLE
@@ -77,6 +90,8 @@ class BLEConnection(QThread):
             if not self.alive:
                 self.lock.release()
                 break
+            while len(self.q) > 0:
+                self.send(bytearray(self.q.popleft()))
             self.lock.release()
             time.sleep(1)
         

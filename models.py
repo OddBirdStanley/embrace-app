@@ -1,8 +1,13 @@
 import torch
 import torch.nn as nn
-
+from collections import deque
 import os
+import time
+import numpy as np
+from threading import Lock
 BIN_PATH = os.path.join(os.path.dirname(__file__), "bin")
+
+from PySide6.QtCore import QThread, Signal, Slot
 
 class CNNLSTMClassifier(nn.Module):
     def __init__(
@@ -112,7 +117,7 @@ class CNNLSTMClassifier(nn.Module):
 MODEL_CONFIG = {
     "Tony": {
         "clazz": CNNLSTMClassifier,
-        "weights": "best_model_v7.pt"
+        "weights": "best_model_v8.pt"
     }
 }
 
@@ -126,5 +131,52 @@ class ModelManager:
         self.model.load_state_dict(torch.load(os.path.join(BIN_PATH, MODEL_CONFIG[name]["weights"])))
     
     def predict(self, sig):
-        return self.model(torch.tensor(sig).to(self.dev))
+        return self.model(torch.tensor(sig).to(self.dev)).cpu().detach().numpy()
+
+class ModelThread(QThread):
+    deposit = Signal(object)
+    predicted = Signal(int)
+    stop = Signal()
+
+    def __init__(self, manager):
+        super().__init__()
+
+        self.manager = manager
+        self.alive = True
+        self.q = deque()
+        self.lock = Lock()
+
+        self.deposit.connect(self.handle_deposit)
+        self.stop.connect(self.cleanup)
+    
+    @Slot()
+    def handle_deposit(self, data):
+        self.lock.acquire()
+        for i in range(data.shape[0]):
+            self.q.append(data[i].copy())
+        self.lock.release()
+    
+    @Slot()
+    def cleanup(self):
+        self.lock.acquire()
+        self.alive = False
+        self.lock.release()
+    
+    def run(self):
+        while True:
+            self.lock.acquire()
+            if not self.alive:
+                break
+            samples = None
+            if len(self.q) >= 600:
+                samples = []
+                for i in range(600):
+                    samples.append(self.q.popleft())
+            self.lock.release()
+            if samples is not None:
+                samples = np.vstack(samples, dtype=np.float32)
+                samples = samples[np.newaxis, :]
+                self.predicted.emit(int(np.argmax(self.manager.predict(samples))))
+            time.sleep(0.1)
+
     

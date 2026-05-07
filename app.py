@@ -109,12 +109,15 @@ class ArmDialog(DeviceDiscoveryDialog):
         return f"{item.name} ({item.address})"
 
 class EmbraceApp(QWidget):
-    ble_cleanup = Signal()
-    mr_cleanup = Signal()
+    MAX_SIG = 1e5
+    MIN_SIG = -1e5
 
     def __init__(self):
         super().__init__()
         self.state = EmbraceState()
+        self.model_thread = models.ModelThread(self.state.model_manager)
+        self.model_thread.predicted.connect(self.model_callback)
+        self.model_thread.start()
 
         root_layout = QVBoxLayout(self)
         control_layout = QHBoxLayout()
@@ -162,11 +165,13 @@ class EmbraceApp(QWidget):
         for i in range(8):
             self.sigs[i].setTextVisible(True)
             self.sigs[i].setValue(0)
+            self.sigs[i].setMinimum(0)
+            self.sigs[i].setMaximum(1)
             self.sigs[i].setFormat(f"Channel {i + 1}")
             self.sigs[i].setEnabled(False)
             sig_layout.addWidget(self.sigs[i])
 
-        preds = [
+        self.preds = [
             QLabel("Extend"),
             QLabel("Fist"),
             QLabel("Flex"),
@@ -175,7 +180,7 @@ class EmbraceApp(QWidget):
             QLabel("Ulnar")
         ]
         pred_layout = QHBoxLayout()
-        for l in preds:
+        for l in self.preds:
             pred_layout.addWidget(l)
             l.setFixedWidth(100)
             l.setFixedHeight(100)
@@ -194,10 +199,21 @@ class EmbraceApp(QWidget):
         root_layout.addWidget(pred_label)
         root_layout.addLayout(pred_layout)
     
+    def closeEvent(self, event):
+        if self.state.mr_connection is not None:
+            self.state.mr_connection.stop.emit()
+            self.state.mr_connection.wait()
+        if self.state.ble_connection is not None:
+            self.state.ble_connection.stop.emit()
+            self.state.ble_connection.wait()
+        if self.model_thread is not None:
+            self.model_thread.stop.emit()
+            self.model_thread.wait()
+        super().closeEvent(event)
+    
     def mindrove_connection_start(self):
         self.mindrove_connect.setEnabled(False)
-        self.state.mr_connection = mr.MindRoveConnection(self)
-        self.destroyed.connect(self.mr_cleanup)
+        self.state.mr_connection = mr.MindRoveConnection()
         self.state.mr_connection.connected.connect(self.mindrove_connection_status)
         self.state.mr_connection.start()
     
@@ -211,19 +227,27 @@ class EmbraceApp(QWidget):
             self.mindrove_connect_handle = self.mindrove_connect.clicked.connect(self.mindrove_stop)
             self.mindrove_connect.setEnabled(True)
             for w in self.sigs:
-                w.setMinimum(0)
-                w.setMaximum(1)
+                w.setMinimum(self.MIN_SIG)
+                w.setMaximum(self.MAX_SIG)
                 w.setEnabled(True)
+            for w in self.preds:
+                w.setStyleSheet(styles.PRED_DIM)
             self.state.mr_connection.update.connect(self.update_mr)
         else:
             self.mindrove_stop()
 
     def mindrove_stop(self):
         self.mindrove_connect.setEnabled(False)
-        for w in self.sigs:
-            w.setEnabled(False)
+        for i in range(8):
+            self.sigs[i].setEnabled(False)
+            self.sigs[i].setValue(0)
+            self.sigs[i].setMinimum(0)
+            self.sigs[i].setMaximum(1)
+            self.sigs[i].setFormat(f"Channel {i + 1}")
+        for w in self.preds:
+            w.setStyleSheet(styles.PRED_INACTIVE)
         self.state.mr_connection.cleanup_complete.connect(self.mindrove_cleanup_complete)
-        self.mr_cleanup.emit()
+        self.state.mr_connection.stop.emit()
     
     @Slot(int)
     def mindrove_cleanup_complete(self, status):
@@ -249,8 +273,7 @@ class EmbraceApp(QWidget):
     @Slot(object)
     def arm_dialog_return(self, address):
         self.arm_connect.setEnabled(False)
-        self.state.ble_connection = ble.BLEConnection(self, address)
-        self.destroyed.connect(self.ble_cleanup)
+        self.state.ble_connection = ble.BLEConnection(address)
         self.state.ble_connection.connected.connect(self.arm_dialog_status)
         self.state.ble_connection.start()
     
@@ -269,7 +292,7 @@ class EmbraceApp(QWidget):
     def arm_dialog_stop(self):
         self.arm_connect.setEnabled(False)
         self.state.ble_connection.cleanup_complete.connect(self.arm_dialog_cleanup_complete)
-        self.ble_cleanup.emit()
+        self.state.ble_connection.stop.emit()
     
     @Slot(int)
     def arm_dialog_cleanup_complete(self, status):
@@ -289,9 +312,21 @@ class EmbraceApp(QWidget):
     
     @Slot(object)
     def update_mr(self, data):
-        last_row = data[0, -1, :]
+        last_row = data[-1, :]
+        self.model_thread.deposit.emit(data)
         for i in range(8):
-            self.sigs[i].setValue(last_row[i])
+            self.sigs[i].setFormat(str(int(last_row[i])))
+            self.sigs[i].setValue(max(min(self.MAX_SIG, last_row[i]), self.MIN_SIG))
+        
+    @Slot(int)
+    def model_callback(self, i):
+        if self.sigs[0].isEnabled():
+            for w in self.preds:
+                w.setStyleSheet(styles.PRED_DIM)
+            if 0 <= i <= 5:
+                self.preds[i].setStyleSheet(styles.PRED_LIT)
+            if self.state.ble_connection is not None:
+                self.state.ble_connection.deposit.emit(i)
 
 if __name__ == "__main__":
     app = QApplication([])
