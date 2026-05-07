@@ -2,15 +2,9 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, Signal, Slot
 
 import ble
+import mr
 import models
 import styles
-
-def make_sep():
-    sep = QFrame()
-    sep.setFrameShape(QFrame.HLine)
-    sep.setLineWidth(2)
-    sep.setStyleSheet("color: grey;")
-    return sep
 
 class EmbraceState:
     def __init__(self):
@@ -18,14 +12,15 @@ class EmbraceState:
         self.arm = None
         self.model_manager = models.ModelManager()
         self.ble_connection = None
+        self.mr_connection = None
 
-class ArmDialog(QDialog):
+class DeviceDiscoveryDialog(QDialog):
     complete = Signal(object)
 
     def __init__(self, parent):
         super().__init__(parent)
         self.devices = []
-        self.setWindowTitle("Bluetooth Arms")
+        self.setWindowTitle(self.title())
         self.setWindowModality(Qt.WindowModal)
 
         root_layout = QVBoxLayout()
@@ -33,8 +28,8 @@ class ArmDialog(QDialog):
         self.discovered.setMinimumWidth(300)
         self.button_yes = QPushButton("Connect")
         self.button_refresh = QPushButton("Refresh")
-        self.button_yes.clicked.connect(self.yes)
-        self.button_refresh.clicked.connect(self.refresh)
+        self.button_yes.clicked.connect(self._yes)
+        self.button_refresh.clicked.connect(self._refresh)
         buttons = QHBoxLayout()
         root_layout.addWidget(self.discovered)
         buttons.addWidget(self.button_refresh)
@@ -42,41 +37,81 @@ class ArmDialog(QDialog):
         root_layout.addLayout(buttons)
         self.setLayout(root_layout)
         
-        self.refresh()
+        self._refresh()
     
-    def refresh(self):
+    def _refresh(self):
         self.devices = []
         self.discovered.clear()
         self.discovered.setEnabled(False)
         self.button_yes.setEnabled(False)
         self.button_refresh.setEnabled(False)
-        self._thread = ble.BLEDiscover()
-        self._thread.complete.connect(self.refresh_complete)
+        self._thread = self.thread()
+        self._thread.complete.connect(self._refresh_complete)
+        self.destroyed.connect(self._thread.terminate)
         self._thread.start()
     
-    def yes(self):
-        self.complete.emit(self.devices[self.discovered.currentIndex()])
+    def _yes(self):
+        self.complete.emit(self.return_value())
         self.close()
     
     @Slot(object)
-    def refresh_complete(self, devices):
+    def _refresh_complete(self, devices):
         if devices is None:
             error = QMessageBox(self)
             error.setIcon(QMessageBox.Icon.Warning)
             error.setWindowTitle("Error")
-            error.setText("Bluetooth is not available.")
+            error.setText(self.error_message())
             error.setStandardButtons(QMessageBox.StandardButton.Ok)
             error.finished.connect(self.close)
             error.show()
         else:
             self.devices = devices
-            self.discovered.addItems([f"{i.name} ({i.address})" for i in self.devices])
+            self.discovered.addItems([self.item_label(i) for i in self.devices])
             self.discovered.setEnabled(True)
             if self.devices:
                 self.button_yes.setEnabled(True)
             self.button_refresh.setEnabled(True)
 
+    # Abstract methods
+    
+    def title(self):
+        raise NotImplementedError
+    
+    def thread(self):
+        raise NotImplementedError
+    
+    def return_value(self):
+        raise NotImplementedError
+    
+    def error_message(self):
+        raise NotImplementedError
+    
+    def item_label(self, item):
+        raise NotImplementedError
+
+class ArmDialog(DeviceDiscoveryDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+    
+    def title(self):
+        return "Bluetooth Arms"
+    
+    def thread(self):
+        return ble.BLEDiscover()
+    
+    def return_value(self):
+        return self.devices[self.discovered.currentIndex()].address
+    
+    def error_message(self):
+        return "Bluetooth is not available."
+    
+    def item_label(self, item):
+        return f"{item.name} ({item.address})"
+
 class EmbraceApp(QWidget):
+    ble_cleanup = Signal()
+    mr_cleanup = Signal()
+
     def __init__(self):
         super().__init__()
         self.state = EmbraceState()
@@ -85,15 +120,16 @@ class EmbraceApp(QWidget):
         control_layout = QHBoxLayout()
         mindrove_status = QVBoxLayout()
         mindrove_status_label_1 = QLabel("MindRove")
-        mindrove_status_label_2 = QLabel("not connected")
-        mindrove_status_label_2.setStyleSheet(styles.LABEL_NO)
+        self.mindrove_status_label_2 = QLabel("not connected")
+        self.mindrove_status_label_2.setStyleSheet(styles.LABEL_NO)
         mindrove_status.addWidget(mindrove_status_label_1)
-        mindrove_status.addWidget(mindrove_status_label_2)
+        mindrove_status.addWidget(self.mindrove_status_label_2)
         mindrove_status_label_1.setAlignment(Qt.AlignCenter)
-        mindrove_status_label_2.setAlignment(Qt.AlignCenter)
+        self.mindrove_status_label_2.setAlignment(Qt.AlignCenter)
         control_layout.addLayout(mindrove_status)
-        mindrove_connect = QPushButton("Connect")
-        control_layout.addWidget(mindrove_connect)
+        self.mindrove_connect = QPushButton("Connect")
+        self.mindrove_connect_handle = self.mindrove_connect.clicked.connect(self.mindrove_connection_start)
+        control_layout.addWidget(self.mindrove_connect)
         arm_status = QVBoxLayout()
         arm_status_label_1 = QLabel("Arm")
         self.arm_status_label_2 = QLabel("not connected")
@@ -121,14 +157,14 @@ class EmbraceApp(QWidget):
         model_status.addWidget(model_status_cuda)
         control_layout.addLayout(model_status)
 
-        sigs = [QProgressBar() for i in range(8)]
+        self.sigs = [QProgressBar() for i in range(8)]
         sig_layout = QVBoxLayout()
         for i in range(8):
-            sigs[i].setTextVisible(True)
-            sigs[i].setValue(0)
-            sigs[i].setFormat(f"Channel {i + 1}")
-            sigs[i].setEnabled(False)
-            sig_layout.addWidget(sigs[i])
+            self.sigs[i].setTextVisible(True)
+            self.sigs[i].setValue(0)
+            self.sigs[i].setFormat(f"Channel {i + 1}")
+            self.sigs[i].setEnabled(False)
+            sig_layout.addWidget(self.sigs[i])
 
         preds = [
             QLabel("Extend"),
@@ -147,54 +183,115 @@ class EmbraceApp(QWidget):
             l.setStyleSheet(styles.PRED_INACTIVE)
 
         root_layout.addLayout(control_layout)
-        root_layout.addWidget(make_sep())
+        root_layout.addWidget(styles.make_sep())
         sig_label = QLabel("Signals")
         sig_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         pred_label = QLabel("Predictions")
         pred_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         root_layout.addWidget(sig_label)
         root_layout.addLayout(sig_layout)
-        root_layout.addWidget(make_sep())
+        root_layout.addWidget(styles.make_sep())
         root_layout.addWidget(pred_label)
         root_layout.addLayout(pred_layout)
     
+    def mindrove_connection_start(self):
+        self.mindrove_connect.setEnabled(False)
+        self.state.mr_connection = mr.MindRoveConnection(self)
+        self.destroyed.connect(self.mr_cleanup)
+        self.state.mr_connection.connected.connect(self.mindrove_connection_status)
+        self.state.mr_connection.start()
+    
+    @Slot(int)
+    def mindrove_connection_status(self, status):
+        if status == mr.CONNECT_SUCCESS:
+            self.mindrove_status_label_2.setText("connected")
+            self.mindrove_status_label_2.setStyleSheet(styles.LABEL_YES)
+            self.mindrove_connect.setText("Disconnect")
+            self.mindrove_connect.disconnect(self.mindrove_connect_handle)
+            self.mindrove_connect_handle = self.mindrove_connect.clicked.connect(self.mindrove_stop)
+            self.mindrove_connect.setEnabled(True)
+            for w in self.sigs:
+                w.setMinimum(0)
+                w.setMaximum(1)
+                w.setEnabled(True)
+            self.state.mr_connection.update.connect(self.update_mr)
+        else:
+            self.mindrove_stop()
+
+    def mindrove_stop(self):
+        self.mindrove_connect.setEnabled(False)
+        for w in self.sigs:
+            w.setEnabled(False)
+        self.state.mr_connection.cleanup_complete.connect(self.mindrove_cleanup_complete)
+        self.mr_cleanup.emit()
+    
+    @Slot(int)
+    def mindrove_cleanup_complete(self, status):
+        self.mindrove_status_label_2.setText("not connected")
+        self.mindrove_status_label_2.setStyleSheet(styles.LABEL_NO)
+        self.mindrove_connect.disconnect(self.mindrove_connect_handle)
+        self.mindrove_connect_handle = self.mindrove_connect.clicked.connect(self.mindrove_connection_start)
+        self.mindrove_connect.setText("Connect")
+        self.mindrove_connect.setEnabled(True)
+        if status == mr.CONNECT_FAILURE:
+            error = QMessageBox(self)
+            error.setIcon(QMessageBox.Icon.Warning)
+            error.setWindowTitle("Error")
+            error.setText("MindRove connection failed.")
+            error.setStandardButtons(QMessageBox.StandardButton.Ok)
+            error.show()
+
     def arm_dialog_show(self):
         dialog = ArmDialog(self)
         dialog.complete.connect(self.arm_dialog_return)
         dialog.show()
     
     @Slot(object)
-    def arm_dialog_return(self, device):
+    def arm_dialog_return(self, address):
         self.arm_connect.setEnabled(False)
-        self.state.ble_connection = ble.BLEConnection(device.address)
-        self.destroyed.connect(self.state.ble_connection.cleanup)
+        self.state.ble_connection = ble.BLEConnection(self, address)
+        self.destroyed.connect(self.ble_cleanup)
         self.state.ble_connection.connected.connect(self.arm_dialog_status)
         self.state.ble_connection.start()
     
-    @Slot(bool)
+    @Slot(int)
     def arm_dialog_status(self, status):
-        if status:
+        if status == ble.CONNECT_SUCCESS:
             self.arm_status_label_2.setText("connected")
             self.arm_status_label_2.setStyleSheet(styles.LABEL_YES)
             self.arm_connect.setText("Disconnect")
             self.arm_connect.disconnect(self.arm_connect_handle)
-            self.arm_connect_handle = self.arm_connect.clicked.connect(self.state.ble_connection.stop)
+            self.arm_connect_handle = self.arm_connect.clicked.connect(self.arm_dialog_stop)
             self.arm_connect.setEnabled(True)
         else:
-            self.arm_status_label_2.setText("not connected")
-            self.arm_status_label_2.setStyleSheet(styles.LABEL_NO)
-            self.state.ble_connection.cleanup()
-            self.state.ble_connection = None
-            self.arm_connect.disconnect(self.arm_connect_handle)
-            self.arm_connect_handle = self.arm_connect.clicked.connect(self.arm_dialog_show)
-            self.arm_connect.setText("Connect")
-            self.arm_connect.setEnabled(True)
+            self.arm_dialog_stop()
+    
+    def arm_dialog_stop(self):
+        self.arm_connect.setEnabled(False)
+        self.state.ble_connection.cleanup_complete.connect(self.arm_dialog_cleanup_complete)
+        self.ble_cleanup.emit()
+    
+    @Slot(int)
+    def arm_dialog_cleanup_complete(self, status):
+        self.arm_status_label_2.setText("not connected")
+        self.arm_status_label_2.setStyleSheet(styles.LABEL_NO)
+        self.arm_connect.disconnect(self.arm_connect_handle)
+        self.arm_connect_handle = self.arm_connect.clicked.connect(self.arm_dialog_show)
+        self.arm_connect.setText("Connect")
+        self.arm_connect.setEnabled(True)
+        if status == ble.CONNECT_FAILURE:
             error = QMessageBox(self)
             error.setIcon(QMessageBox.Icon.Warning)
             error.setWindowTitle("Error")
             error.setText("Bluetooth connection failed.")
             error.setStandardButtons(QMessageBox.StandardButton.Ok)
             error.show()
+    
+    @Slot(object)
+    def update_mr(self, data):
+        last_row = data[0, -1, :]
+        for i in range(8):
+            self.sigs[i].setValue(last_row[i])
 
 if __name__ == "__main__":
     app = QApplication([])

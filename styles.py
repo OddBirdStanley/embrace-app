@@ -1,3 +1,5 @@
+from PySide6.QtWidgets import QFrame
+
 PRED_LIT = """
 border-radius: 5px;
 border: 1px solid black;
@@ -24,3 +26,10 @@ LABEL_NO = """
 font-weight: bold;
 color: red;
 """
+
+def make_sep():
+    sep = QFrame()
+    sep.setFrameShape(QFrame.HLine)
+    sep.setLineWidth(2)
+    sep.setStyleSheet("color: grey;")
+    return sep

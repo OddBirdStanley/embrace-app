@@ -1,13 +1,18 @@
 import bleak
 import asyncio
 import time
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal, Slot
 from threading import Lock
 
 SERVICE = None
-CHARACTERISTIC = None
+#SERVICE = ["bf77b1ec-80a9-4849-9c64-e6dcd32eb5c9"]
+CHARACTERISTIC = "49b7f353-b294-4023-abb7-1976b9494c2e"
 
-TEST = bytearray(0x7f)
+TEST = bytearray(0x70)
+
+CONNECT_SUCCESS = 0
+CONNECT_FAILURE = 1
+CONNECT_NORMAL = 2
 
 class BLEDiscover(QThread):
     complete = Signal(object)
@@ -24,49 +29,60 @@ class BLEDiscover(QThread):
         self.complete.emit(asyncio.run(self.discover()))
 
 class BLEConnection(QThread):
-    connected = Signal(bool)
+    connected = Signal(int)
+    cleanup_complete = Signal(int)
 
-    def __init__(self, address):
+    def __init__(self, parent, address):
         super().__init__()
 
+        self.parent = parent
+        self.parent.ble_cleanup.connect(self.cleanup)
         self.address = address
         self.client = None
         self.alive = True
+        self.has_error = False
         self.lock = Lock()
         self.destroyed.connect(self.cleanup)
     
-    def stop(self):
-        self.alive = False
-    
+    @Slot()
     def cleanup(self):
         try:
             asyncio.run(self.client.disconnect())
         except:
             pass
-        print("Bluetooth cleanup successful")
+        self.cleanup_complete.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)
 
     def run(self):
+        # connect to BLE
         self.client = bleak.BleakClient(self.address)
         try:
             asyncio.run(self.client.connect(timeout=5))
         except:
-            self.connected.emit(False)
+            self.has_error = True
+            self.connected.emit(CONNECT_FAILURE)
             return
-        self.send(TEST)
+
+        # send test message
+        #self.send(TEST)
         self.lock.acquire()
         if not self.alive:
-            return
-        self.connected.emit(True)
+            self.has_error = True
+            self.connected.emit(CONNECT_FAILURE)
+            return # destroyed auto-cleanup
         self.lock.release()
+        self.connected.emit(CONNECT_SUCCESS)
 
         while True:
             self.lock.acquire()
             if not self.alive:
+                self.lock.release()
                 break
             self.lock.release()
             time.sleep(1)
         
-        self.connected.emit(False)
+        self.lock.acquire()
+        self.connected.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)
+        self.lock.release()
     
     async def _send(self, data):
         try:
@@ -81,5 +97,6 @@ class BLEConnection(QThread):
     def send(self, data):
         self.lock.acquire()
         if not asyncio.run(self._send(data)):
-            self._alive = False
+            self.alive = False
+            self.has_error = True
         self.lock.release()
