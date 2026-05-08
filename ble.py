@@ -54,7 +54,6 @@ class BLEConnection(QThread):
         self.q.append(i)
         self.lock.release()
     
-    @Slot()
     def cleanup(self):
         try:
             asyncio.run(self.client.disconnect())

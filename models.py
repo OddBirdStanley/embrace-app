@@ -149,14 +149,12 @@ class ModelThread(QThread):
         self.deposit.connect(self.handle_deposit)
         self.stop.connect(self.cleanup)
     
-    @Slot()
     def handle_deposit(self, data):
         self.lock.acquire()
         for i in range(data.shape[0]):
             self.q.append(data[i].copy())
         self.lock.release()
     
-    @Slot()
     def cleanup(self):
         self.lock.acquire()
         self.alive = False

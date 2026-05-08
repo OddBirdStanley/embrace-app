@@ -1,10 +1,22 @@
 from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, Signal, Slot
-
+from threading import Lock
 import ble
 import mr
 import models
 import styles
+import os
+import time
+import numpy as np
+
+ROOT_PATH = os.path.dirname(__file__)
+RECORD_PATH = os.path.join(ROOT_PATH, "record")
+if not os.path.exists(RECORD_PATH):
+    os.mkdir(RECORD_PATH)
+MAX_SIG = 1e5
+MIN_SIG = -1e5
+GESTURES = ["Extend", "Fist", "Flex", "Radial", "Rest", "Ulnar"]
+#GESTURES = ["Extend", "Fist", "Flex", "Radial", "Rest", "Ulnar", "Pronation", "Supination"]
 
 class EmbraceState:
     def __init__(self):
@@ -108,16 +120,124 @@ class ArmDialog(DeviceDiscoveryDialog):
     def item_label(self, item):
         return f"{item.name} ({item.address})"
 
-class EmbraceApp(QWidget):
-    MAX_SIG = 1e5
-    MIN_SIG = -1e5
+class RecordDialog(QDialog):
+    deposit = Signal(object)
 
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowModality(Qt.WindowModal)
+        self.setWindowTitle("Record MindRove")
+        
+        self.setMinimumWidth(400)
+        self.app = parent
+        root_layout = QVBoxLayout(self)
+        self.curr = QLabel("--")
+        self.curr.setStyleSheet("font-size: 30px;")
+        self.curr.setAlignment(Qt.AlignCenter)
+        self.next = QLabel("--")
+        self.next.setStyleSheet("font-size: 15px;")
+        self.next.setAlignment(Qt.AlignCenter)
+        self.counter = QLabel("--")
+        self.counter.setStyleSheet("font-size: 15px;")
+        self.counter.setAlignment(Qt.AlignCenter)
+        root_layout.addWidget(self.curr)
+        root_layout.addWidget(self.next)
+        root_layout.addWidget(self.counter)
+        self.control = QPushButton("Start")
+        self.control.clicked.connect(self.record_control)
+        self.save_button = QPushButton("Save")
+        self.save_button.clicked.connect(self.save)
+        self.close_button = QPushButton("Close")
+        self.close_button.clicked.connect(self.close)
+        root_layout.addWidget(self.control)
+        root_layout.addWidget(self.save_button)
+        root_layout.addWidget(self.close_button)
+
+        self.recording = False
+        self.lock = Lock()
+        self.deposit.connect(self.handle_deposit)
+
+        self.memory = np.empty((0, 8))
+        self.labels = np.array([])
+        self.active_recording = False
+        self.curr_index = -1
+    
+    def save(self):
+        if len(self.memory) > -1:
+            np.savetxt(os.path.join(RECORD_PATH, f"{int(time.time() * 1000)}.csv"), self.memory, delimiter="\t")
+            self.memory = np.empty((0, 8))
+
+    @Slot(object)
+    def handle_deposit(self, data):
+        self.lock.acquire()
+        if self.active_recording:
+            self.memory = np.vstack((self.memory, data))
+            self.labels = np.concatenate((self.labels, np.repeat(self.curr_index, len(data))))
+        self.lock.release()
+    
+    def record_control(self):
+        if not self.recording:
+            self.lock.acquire()
+            self.memory = np.empty((0, 8))
+            self.labels = np.array([])
+            self.lock.release()
+            self.app.record_thread = mr.MindRoveRecord(len(GESTURES))
+            self.app.record_thread.instruction.connect(self.instruction_callback)
+            self.app.record_thread.end.connect(self.record_stop_wait)
+            self.save_button.setEnabled(False)
+            self.close_button.setEnabled(False)
+            self.control.setText("Stop")
+            self.counter.setText("--")
+            self.recording = True
+            self.app.record_thread.start()
+        else:
+            self.app.record_thread.stop.emit()
+    
+    def record_stop_wait(self):
+        self.lock.acquire()
+        self.active_recording = False
+        self.curr_index = -1
+        self.memory = np.hstack((self.memory, self.labels.reshape(-1, 1)))
+        self.lock.release()
+
+        self.recording = False
+        self.curr.setText("--")
+        self.next.setText("--")
+        self.control.setText("Start")
+        self.save_button.setEnabled(True)
+        self.close_button.setEnabled(True)
+
+    @Slot(object)
+    def instruction_callback(self, instruction):
+        if instruction[0] == "cd":
+            self.curr.setText(str(instruction[1]))
+        elif instruction[0] == "use":
+            self.lock.acquire()
+            self.active_recording = True
+            self.curr_index = instruction[1]
+            self.lock.release()
+
+            self.curr.setText(f"{GESTURES[instruction[1]]} {instruction[3]}")
+            self.next.setText(f"Next: {GESTURES[instruction[2]]}")
+            self.lock.acquire()
+            self.counter.setText(f"Samples: {len(self.memory)}")
+            self.lock.release()
+
+    def closeEvent(self, event):
+        if self.app.record_thread is not None:
+            self.app.record_thread.stop.emit()
+            self.app.record_thread.wait()
+        super().closeEvent(event)
+
+class EmbraceApp(QWidget):
     def __init__(self):
         super().__init__()
         self.state = EmbraceState()
         self.model_thread = models.ModelThread(self.state.model_manager)
         self.model_thread.predicted.connect(self.model_callback)
         self.model_thread.start()
+
+        self.record_thread = None
 
         root_layout = QVBoxLayout(self)
         control_layout = QHBoxLayout()
@@ -130,9 +250,15 @@ class EmbraceApp(QWidget):
         mindrove_status_label_1.setAlignment(Qt.AlignCenter)
         self.mindrove_status_label_2.setAlignment(Qt.AlignCenter)
         control_layout.addLayout(mindrove_status)
+        mindrove_ops = QVBoxLayout()
         self.mindrove_connect = QPushButton("Connect")
         self.mindrove_connect_handle = self.mindrove_connect.clicked.connect(self.mindrove_connection_start)
-        control_layout.addWidget(self.mindrove_connect)
+        self.mindrove_record = QPushButton("Record")
+        self.mindrove_record.clicked.connect(self.mindrove_record_start)
+        self.mindrove_record.setEnabled(False)
+        mindrove_ops.addWidget(self.mindrove_connect)
+        mindrove_ops.addWidget(self.mindrove_record)
+        control_layout.addLayout(mindrove_ops)
         arm_status = QVBoxLayout()
         arm_status_label_1 = QLabel("Arm")
         self.arm_status_label_2 = QLabel("not connected")
@@ -171,14 +297,7 @@ class EmbraceApp(QWidget):
             self.sigs[i].setEnabled(False)
             sig_layout.addWidget(self.sigs[i])
 
-        self.preds = [
-            QLabel("Extend"),
-            QLabel("Fist"),
-            QLabel("Flex"),
-            QLabel("Radial"),
-            QLabel("Rest"),
-            QLabel("Ulnar")
-        ]
+        self.preds = [QLabel(g) for g in GESTURES]
         pred_layout = QHBoxLayout()
         for l in self.preds:
             pred_layout.addWidget(l)
@@ -198,8 +317,13 @@ class EmbraceApp(QWidget):
         root_layout.addWidget(styles.make_sep())
         root_layout.addWidget(pred_label)
         root_layout.addLayout(pred_layout)
+
+        self.record_blocking = False
     
     def closeEvent(self, event):
+        if self.record_thread is not None:
+            self.record_thread.stop.emit()
+            self.record_thread.wait()
         if self.state.mr_connection is not None:
             self.state.mr_connection.stop.emit()
             self.state.mr_connection.wait()
@@ -227,11 +351,12 @@ class EmbraceApp(QWidget):
             self.mindrove_connect_handle = self.mindrove_connect.clicked.connect(self.mindrove_stop)
             self.mindrove_connect.setEnabled(True)
             for w in self.sigs:
-                w.setMinimum(self.MIN_SIG)
-                w.setMaximum(self.MAX_SIG)
+                w.setMinimum(MIN_SIG)
+                w.setMaximum(MAX_SIG)
                 w.setEnabled(True)
             for w in self.preds:
                 w.setStyleSheet(styles.PRED_DIM)
+            self.mindrove_record.setEnabled(True)
             self.state.mr_connection.update.connect(self.update_mr)
         else:
             self.mindrove_stop()
@@ -246,6 +371,7 @@ class EmbraceApp(QWidget):
             self.sigs[i].setFormat(f"Channel {i + 1}")
         for w in self.preds:
             w.setStyleSheet(styles.PRED_INACTIVE)
+        self.mindrove_record.setEnabled(False)
         self.state.mr_connection.cleanup_complete.connect(self.mindrove_cleanup_complete)
         self.state.mr_connection.stop.emit()
     
@@ -313,20 +439,32 @@ class EmbraceApp(QWidget):
     @Slot(object)
     def update_mr(self, data):
         last_row = data[-1, :]
-        self.model_thread.deposit.emit(data)
+        if self.record_blocking:
+            self.record_dialog.deposit.emit(data)
+        else:
+            self.model_thread.deposit.emit(data)
         for i in range(8):
             self.sigs[i].setFormat(str(int(last_row[i])))
-            self.sigs[i].setValue(max(min(self.MAX_SIG, last_row[i]), self.MIN_SIG))
+            self.sigs[i].setValue(max(min(MAX_SIG, last_row[i]), MIN_SIG))
         
     @Slot(int)
     def model_callback(self, i):
-        if self.sigs[0].isEnabled():
+        if self.mindrove_record.isEnabled():
             for w in self.preds:
                 w.setStyleSheet(styles.PRED_DIM)
-            if 0 <= i <= 5:
+            if 0 <= i < len(GESTURES):
                 self.preds[i].setStyleSheet(styles.PRED_LIT)
             if self.state.ble_connection is not None:
                 self.state.ble_connection.deposit.emit(i)
+    
+    def mindrove_record_start(self):
+        self.record_blocking = True
+        self.record_dialog = RecordDialog(self)
+        self.record_dialog.finished.connect(self.mindrove_record_callback)
+        self.record_dialog.show()
+
+    def mindrove_record_callback(self):
+        self.record_blocking = False
 
 if __name__ == "__main__":
     app = QApplication([])
