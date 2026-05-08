@@ -211,6 +211,7 @@ class RecordDialog(QDialog):
     def instruction_callback(self, instruction):
         if instruction[0] == "cd":
             self.curr.setText(str(instruction[1]))
+            self.next.setText(f"Next: {GESTURES[instruction[2]]}")
         elif instruction[0] == "use":
             self.lock.acquire()
             self.active_recording = True
