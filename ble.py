@@ -5,8 +5,7 @@ from collections import deque
 from PySide6.QtCore import QThread, Signal, Slot
 from threading import Lock
 
-SERVICE = None
-#SERVICE = ["bf77b1ec-80a9-4849-9c64-e6dcd32eb5c9"]
+SERVICE = ["bf77b1ec-80a9-4849-9c64-e6dcd32eb5c9"]
 CHARACTERISTIC = "49b7f353-b294-4023-abb7-1976b9494c2e"
 
 TEST = bytearray(0x70)
