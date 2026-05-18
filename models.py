@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from collections import deque
+import gc
 import os
 import time
 import numpy as np
@@ -128,6 +129,8 @@ class ModelManager:
     
     def set_model(self, name):
         self.model = MODEL_CONFIG[name]["clazz"]().to(self.dev)
+        gc.collect()
+        torch.cuda.empty_cache()
         self.model.load_state_dict(torch.load(os.path.join(BIN_PATH, MODEL_CONFIG[name]["weights"])))
     
     def predict(self, sig):

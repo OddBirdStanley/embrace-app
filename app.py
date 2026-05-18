@@ -6,7 +6,7 @@ import mr
 import models
 import styles
 import os
-import time
+import datetime
 import numpy as np
 
 ROOT_PATH = os.path.dirname(__file__)
@@ -164,7 +164,7 @@ class RecordDialog(QDialog):
     
     def save(self):
         if len(self.memory) > -1:
-            np.savetxt(os.path.join(RECORD_PATH, f"{int(time.time() * 1000)}.csv"), self.memory, delimiter="\t")
+            np.savetxt(os.path.join(RECORD_PATH, f"{datetime.datetime.now().isoformat(timespec="microseconds")}.csv"), self.memory, delimiter="\t")
             self.memory = np.empty((0, 8))
 
     @Slot(object)
@@ -275,11 +275,12 @@ class EmbraceApp(QWidget):
         model_status = QVBoxLayout()
         model_choose = QHBoxLayout()
         model_choose_label = QLabel("Model:")
-        model_choose_menu = QComboBox()
-        model_choose_menu.addItems(models.MODEL_CONFIG.keys())
-        self.state.model_manager.set_model(model_choose_menu.currentText())
+        self.model_choose_menu = QComboBox()
+        self.model_choose_menu.addItems(models.MODEL_CONFIG.keys())
+        #self.model_choose_menu.currentIndexChanged(self.change_model)
+        self.state.model_manager.set_model(self.model_choose_menu.currentText())
         model_choose.addWidget(model_choose_label)
-        model_choose.addWidget(model_choose_menu)
+        model_choose.addWidget(self.model_choose_menu)
         model_status.addLayout(model_choose)
         model_status_cuda = QLabel(f"CUDA: {'OK' if self.state.model_manager.dev == 'cuda' else 'none'}")
         model_status_cuda.setStyleSheet(styles.LABEL_YES if self.state.model_manager.dev == "cuda" else styles.LABEL_NO)
@@ -335,6 +336,10 @@ class EmbraceApp(QWidget):
             self.model_thread.stop.emit()
             self.model_thread.wait()
         super().closeEvent(event)
+    
+    @Slot(int)
+    def change_model(self, index):
+        self.state.model_manager.set_model(self.model_choose_menu.currentText())
     
     def mindrove_connection_start(self):
         self.mindrove_connect.setEnabled(False)
