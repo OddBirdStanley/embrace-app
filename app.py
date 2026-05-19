@@ -163,9 +163,19 @@ class RecordDialog(QDialog):
         self.curr_index = -1
     
     def save(self):
-        if len(self.memory) > -1:
-            np.savetxt(os.path.join(RECORD_PATH, f"{datetime.datetime.now().isoformat(timespec="microseconds")}.csv"), self.memory, delimiter="\t")
+        if len(self.memory) > 0:
+            fn = f"{datetime.datetime.now().isoformat(timespec="microseconds")}.csv"
+            fn = fn.replace(":", "-")
+            np.savetxt(os.path.join(RECORD_PATH, fn) , self.memory, delimiter="\t")
             self.memory = np.empty((0, 8))
+            self.counter.setText("Samples: 0")
+        else:
+            error = QMessageBox(self)
+            error.setIcon(QMessageBox.Icon.Warning)
+            error.setWindowTitle("Warning")
+            error.setText("No samples remaining to save.")
+            error.setStandardButtons(QMessageBox.StandardButton.Ok)
+            error.show()
 
     @Slot(object)
     def handle_deposit(self, data):
