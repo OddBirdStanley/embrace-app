@@ -166,6 +166,7 @@ class RecordDialog(QDialog):
         if len(self.memory) > 0:
             fn = f"{datetime.datetime.now().isoformat(timespec="microseconds")}.csv"
             fn = fn.replace(":", "-")
+            print(f"[Debug] saved memory {self.memory.shape[0]}x{self.memory.shape[1]}")
             np.savetxt(os.path.join(RECORD_PATH, fn) , self.memory, delimiter="\t")
             self.memory = np.empty((0, 8))
             self.counter.setText("Samples: 0")
