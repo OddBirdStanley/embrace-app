@@ -16,7 +16,7 @@ class MindRoveRecord(QThread):
     end = Signal()
     stop = Signal()
 
-    def __init__(self, type_count, interval=9):
+    def __init__(self, type_count, interval=3):
         super().__init__()
 
         self.type_count = type_count
@@ -32,9 +32,9 @@ class MindRoveRecord(QThread):
         self.lock.release()
     
     def run(self):
-        index = randint(0, self.type_count - 1)
+        index = randint(1, self.type_count)
         for i in range(3, 0, -1):
-            self.instruction.emit(("cd", i, index))
+            self.instruction.emit(("cd", i, index - 1))
             self.lock.acquire()
             if not self.alive:
                 self.end.emit()
@@ -44,14 +44,18 @@ class MindRoveRecord(QThread):
             time.sleep(1)
 
         while True:
-            index_next = (index + 1) % self.type_count
+            index_next = -index
+            if index_next > 0:
+                index_next += 1
+                if index_next > self.type_count:
+                    index_next = 1
             for i in range(self.interval, 0, -1):
                 self.lock.acquire()
                 if not self.alive:
                     self.lock.release()
                     break
                 self.lock.release()
-                self.instruction.emit(("use", index, index_next, i))
+                self.instruction.emit(("use", index - 1, index_next - 1, i))
                 time.sleep(1)
             self.lock.acquire()
             if not self.alive:

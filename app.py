@@ -183,7 +183,7 @@ class RecordDialog(QDialog):
         self.lock.acquire()
         if self.active_recording:
             self.memory = np.vstack((self.memory, data))
-            self.labels = np.concatenate((self.labels, np.repeat(self.curr_index, len(data))))
+            self.labels = np.concatenate((self.labels, np.repeat(self.curr_index if self.curr_index >= 0 else np.nan, len(data))))
         self.lock.release()
     
     def record_control(self):
@@ -217,20 +217,25 @@ class RecordDialog(QDialog):
         self.control.setText("Start")
         self.save_button.setEnabled(True)
         self.close_button.setEnabled(True)
+    
+    def _get_gesture_name(self, i):
+        if i < 0:
+            return "PAUSE"
+        return self.app.state.gestures[i]
 
     @Slot(object)
     def instruction_callback(self, instruction):
         if instruction[0] == "cd":
             self.curr.setText(str(instruction[1]))
-            self.next.setText(f"Next: {self.app.state.gestures[instruction[2]]}")
+            self.next.setText(f"Next: {self._get_gesture_name(instruction[2])}")
         elif instruction[0] == "use":
             self.lock.acquire()
             self.active_recording = True
             self.curr_index = instruction[1]
             self.lock.release()
 
-            self.curr.setText(f"{self.app.state.gestures[instruction[1]]} {instruction[3]}")
-            self.next.setText(f"Next: {self.app.state.gestures[instruction[2]]}")
+            self.curr.setText(f"{self._get_gesture_name(instruction[1])} {instruction[3]}")
+            self.next.setText(f"Next: {self._get_gesture_name(instruction[2])}")
             self.lock.acquire()
             self.counter.setText(f"Samples: {len(self.memory)}")
             self.lock.release()
