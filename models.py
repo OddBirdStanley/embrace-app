@@ -10,11 +10,11 @@ BIN_PATH = os.path.join(os.path.dirname(__file__), "bin")
 
 from PySide6.QtCore import QThread, Signal, Slot
 
-class CNNLSTMClassifier(nn.Module):
+class CNNLSTMClassifier8(nn.Module):
     def __init__(
         self,
         input_size: int = 8,
-        num_classes: int = 6,
+        num_classes: int = 8,
         conv_channels: list[int] | tuple[int, ...] = (48, 96),
         kernel_size: int = 7,
         lstm_hidden_size: int = 96,
@@ -116,9 +116,11 @@ class CNNLSTMClassifier(nn.Module):
         return logits
 
 MODEL_CONFIG = {
-    "Tony": {
-        "clazz": CNNLSTMClassifier,
-        "weights": "best_model_v8.pt"
+    "Tony-8": {
+        "clazz": CNNLSTMClassifier8,
+        "weights": "best_model_8.pt",
+        "window": 150,
+        "step": 25
     }
 }
 
@@ -128,10 +130,11 @@ class ModelManager:
         self.model = None
     
     def set_model(self, name):
-        self.model = MODEL_CONFIG[name]["clazz"]().to(self.dev)
+        self.config = MODEL_CONFIG[name]
+        self.model = self.config["clazz"]().to(self.dev)
         gc.collect()
         torch.cuda.empty_cache()
-        self.model.load_state_dict(torch.load(os.path.join(BIN_PATH, MODEL_CONFIG[name]["weights"])))
+        self.model.load_state_dict(torch.load(os.path.join(BIN_PATH, self.config["weights"])))
     
     def predict(self, sig):
         return self.model(torch.tensor(sig).to(self.dev)).cpu().detach().numpy()
@@ -167,12 +170,15 @@ class ModelThread(QThread):
         while True:
             self.lock.acquire()
             if not self.alive:
+                self.lock.release()
                 break
             samples = None
-            if len(self.q) >= 600:
+            if len(self.q) >= self.manager.config["window"]:
                 samples = []
-                for i in range(600):
+                for i in range(self.manager.config["window"]):
                     samples.append(self.q.popleft())
+                for i in range(len(samples) - 1, self.manager.config["step"] - 1, -1):
+                    self.q.appendleft(samples[i].copy())
             self.lock.release()
             if samples is not None:
                 samples = np.vstack(samples, dtype=np.float32)

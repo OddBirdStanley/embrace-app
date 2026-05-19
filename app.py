@@ -15,16 +15,17 @@ if not os.path.exists(RECORD_PATH):
     os.mkdir(RECORD_PATH)
 MAX_SIG = 1e5
 MIN_SIG = -1e5
-GESTURES = ["Extend", "Fist", "Flex", "Radial", "Rest", "Ulnar"]
-#GESTURES = ["Extend", "Fist", "Flex", "Radial", "Rest", "Ulnar", "Pronation", "Supination"]
+#GESTURES = ["Extend", "Fist", "Flex", "Radial", "Rest", "Ulnar"]
+GESTURES = ["Extend", "Fist", "Flex", "Pronation", "Radial", "Rest", "Supination", "Ulnar"]
 
 class EmbraceState:
-    def __init__(self):
+    def __init__(self, gestures):
         self.mindrove = None
         self.arm = None
         self.model_manager = models.ModelManager()
         self.ble_connection = None
         self.mr_connection = None
+        self.gestures = gestures
 
 class DeviceDiscoveryDialog(QDialog):
     complete = Signal(object)
@@ -166,7 +167,6 @@ class RecordDialog(QDialog):
         if len(self.memory) > 0:
             fn = f"{datetime.datetime.now().isoformat(timespec="microseconds")}.csv"
             fn = fn.replace(":", "-")
-            print(f"[Debug] saved memory {self.memory.shape[0]}x{self.memory.shape[1]}")
             np.savetxt(os.path.join(RECORD_PATH, fn) , self.memory, delimiter="\t")
             self.memory = np.empty((0, 8))
             self.counter.setText("Samples: 0")
@@ -192,7 +192,7 @@ class RecordDialog(QDialog):
             self.memory = np.empty((0, 8))
             self.labels = np.array([])
             self.lock.release()
-            self.app.record_thread = mr.MindRoveRecord(len(GESTURES))
+            self.app.record_thread = mr.MindRoveRecord(len(self.app.state.gestures))
             self.app.record_thread.instruction.connect(self.instruction_callback)
             self.app.record_thread.end.connect(self.record_stop_wait)
             self.save_button.setEnabled(False)
@@ -222,15 +222,15 @@ class RecordDialog(QDialog):
     def instruction_callback(self, instruction):
         if instruction[0] == "cd":
             self.curr.setText(str(instruction[1]))
-            self.next.setText(f"Next: {GESTURES[instruction[2]]}")
+            self.next.setText(f"Next: {self.app.state.gestures[instruction[2]]}")
         elif instruction[0] == "use":
             self.lock.acquire()
             self.active_recording = True
             self.curr_index = instruction[1]
             self.lock.release()
 
-            self.curr.setText(f"{GESTURES[instruction[1]]} {instruction[3]}")
-            self.next.setText(f"Next: {GESTURES[instruction[2]]}")
+            self.curr.setText(f"{self.app.state.gestures[instruction[1]]} {instruction[3]}")
+            self.next.setText(f"Next: {self.app.state.gestures[instruction[2]]}")
             self.lock.acquire()
             self.counter.setText(f"Samples: {len(self.memory)}")
             self.lock.release()
@@ -244,10 +244,9 @@ class RecordDialog(QDialog):
 class EmbraceApp(QWidget):
     def __init__(self):
         super().__init__()
-        self.state = EmbraceState()
+        self.state = EmbraceState(GESTURES)
         self.model_thread = models.ModelThread(self.state.model_manager)
         self.model_thread.predicted.connect(self.model_callback)
-        self.model_thread.start()
 
         self.record_thread = None
 
@@ -290,6 +289,7 @@ class EmbraceApp(QWidget):
         self.model_choose_menu.addItems(models.MODEL_CONFIG.keys())
         #self.model_choose_menu.currentIndexChanged(self.change_model)
         self.state.model_manager.set_model(self.model_choose_menu.currentText())
+        self.model_thread.start()
         model_choose.addWidget(model_choose_label)
         model_choose.addWidget(self.model_choose_menu)
         model_status.addLayout(model_choose)
@@ -310,7 +310,7 @@ class EmbraceApp(QWidget):
             self.sigs[i].setEnabled(False)
             sig_layout.addWidget(self.sigs[i])
 
-        self.preds = [QLabel(g) for g in GESTURES]
+        self.preds = [QLabel(g) for g in self.state.gestures]
         pred_layout = QHBoxLayout()
         for l in self.preds:
             pred_layout.addWidget(l)
@@ -469,7 +469,7 @@ class EmbraceApp(QWidget):
         if self.mindrove_record.isEnabled():
             for w in self.preds:
                 w.setStyleSheet(styles.PRED_DIM)
-            if 0 <= i < len(GESTURES):
+            if 0 <= i < len(self.state.gestures):
                 self.preds[i].setStyleSheet(styles.PRED_LIT)
             if self.state.ble_connection is not None:
                 self.state.ble_connection.deposit.emit(i)

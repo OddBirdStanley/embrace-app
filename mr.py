@@ -32,7 +32,7 @@ class MindRoveRecord(QThread):
         self.lock.release()
     
     def run(self):
-        index = randint(0, self.type_count - 1)
+        index = 0
         for i in range(3, 0, -1):
             self.instruction.emit(("cd", i, index))
             self.lock.acquire()
@@ -44,7 +44,7 @@ class MindRoveRecord(QThread):
             time.sleep(1)
 
         while True:
-            index_next = randint(0, self.type_count - 1)
+            index_next = (index + 1) % self.type_count
             for i in range(self.interval, 0, -1):
                 self.lock.acquire()
                 if not self.alive:
