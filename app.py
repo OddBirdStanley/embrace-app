@@ -261,10 +261,14 @@ class EmbraceApp(QWidget):
         mindrove_status_label_1 = QLabel("MindRove")
         self.mindrove_status_label_2 = QLabel("not connected")
         self.mindrove_status_label_2.setStyleSheet(styles.LABEL_NO)
+        self.mindrove_status_label_3 = QLabel("Battery: unknown")
+        self.mindrove_status_label_3.setStyleSheet(styles.LABEL_NO)
         mindrove_status.addWidget(mindrove_status_label_1)
         mindrove_status.addWidget(self.mindrove_status_label_2)
+        mindrove_status.addWidget(self.mindrove_status_label_3)
         mindrove_status_label_1.setAlignment(Qt.AlignCenter)
         self.mindrove_status_label_2.setAlignment(Qt.AlignCenter)
+        self.mindrove_status_label_3.setAlignment(Qt.AlignCenter)
         control_layout.addLayout(mindrove_status)
         mindrove_ops = QVBoxLayout()
         self.mindrove_connect = QPushButton("Connect")
@@ -380,6 +384,7 @@ class EmbraceApp(QWidget):
                 w.setStyleSheet(styles.PRED_DIM)
             self.mindrove_record.setEnabled(True)
             self.state.mr_connection.update.connect(self.update_mr)
+            self.state.mr_connection.update_battery.connect(self.update_mr_battery)
         else:
             self.mindrove_stop()
 
@@ -401,6 +406,8 @@ class EmbraceApp(QWidget):
     def mindrove_cleanup_complete(self, status):
         self.mindrove_status_label_2.setText("not connected")
         self.mindrove_status_label_2.setStyleSheet(styles.LABEL_NO)
+        self.mindrove_status_label_3.setText("Battery: unknown")
+        self.mindrove_status_label_3.setStyleSheet(styles.LABEL_NO)
         self.mindrove_connect.disconnect(self.mindrove_connect_handle)
         self.mindrove_connect_handle = self.mindrove_connect.clicked.connect(self.mindrove_connection_start)
         self.mindrove_connect.setText("Connect")
@@ -468,6 +475,11 @@ class EmbraceApp(QWidget):
         for i in range(8):
             self.sigs[i].setFormat(str(int(last_row[i])))
             self.sigs[i].setValue(max(min(MAX_SIG, last_row[i]), MIN_SIG))
+    
+    @Slot(float)
+    def update_mr_battery(self, value):
+        self.mindrove_status_label_3.setText(f"Battery: {value * 100:.2f}%")
+        self.mindrove_status_label_3.setStyleSheet(styles.LABEL_YES)
         
     @Slot(int)
     def model_callback(self, i):

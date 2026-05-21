@@ -94,7 +94,6 @@ BOARD_DESCRIPTORS = {
     },
 }
 
-
 def get_board_descr(board_id, preset=0):
     if board_id not in BOARD_DESCRIPTORS:
         raise ValueError(f"Unknown board_id: {board_id}")
@@ -103,22 +102,20 @@ def get_board_descr(board_id, preset=0):
         raise ValueError(f"Unknown preset {preset} for board_id {board_id}")
     return presets[preset]
 
-
 def get_sampling_rate(board_id=0, preset=0):
     return get_board_descr(board_id, preset)["sampling_rate"]
-
 
 def get_eeg_channels(board_id=0, preset=0):
     return get_board_descr(board_id, preset).get("eeg_channels", [])
 
-
 def get_emg_channels(board_id=0, preset=0):
     return get_board_descr(board_id, preset).get("emg_channels", [])
-
 
 def get_exg_channels(board_id=0, preset=0):
     return get_board_descr(board_id, preset).get("exg_channels", [])
 
-
 def get_num_rows(board_id=0, preset=0):
     return get_board_descr(board_id, preset)["num_rows"]
+
+def get_battery(board_id=0, preset=0):
+    return get_board_descr(board_id, preset).get("battery_channel", -1)
