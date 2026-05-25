@@ -5,7 +5,7 @@ import numpy as np
 from PySide6.QtCore import QThread, Signal, Slot
 from random import randint
 from openmr.stream import MindRoveStream
-from openmr.board_metadata import get_emg_channels, get_battery
+from openmr.board_metadata import get_emg_channels
 
 CONNECT_FAILURE = 0
 CONNECT_SUCCESS = 1
@@ -70,7 +70,6 @@ class MindRoveConnection(QThread):
     connected = Signal(int)
     cleanup_complete = Signal(int)
     update = Signal(object)
-    update_battery = Signal(float)
     stop = Signal()
 
     def __init__(self):
@@ -97,7 +96,6 @@ class MindRoveConnection(QThread):
         try:
             self.stream = MindRoveStream()
             self._channels = get_emg_channels()
-            self._battery = get_battery()
             self.stream.start(-1)
         except:
             self.has_error = True
@@ -115,14 +113,12 @@ class MindRoveConnection(QThread):
                 data = self.stream.get_data()[self._channels, :].transpose()
                 if data.shape[0] > 0:
                     self.update.emit(data)
-                batt = self.stream.get_data()[self._battery, :].transpose[0][0]
-                self.update_battery.emit(batt)
             except:
                 self.lock.acquire()
                 self.has_error = True
                 self.lock.release()
                 break
-            time.sleep(0.01)
+            time.sleep(0.1)
 
         self.lock.acquire()
         self.connected.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)
