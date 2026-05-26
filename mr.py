@@ -33,7 +33,7 @@ class MindRoveRecord(QThread):
     
     def run(self):
         index = randint(1, self.type_count)
-        for i in range(3, 0, -1):
+        for i in range(self.interval, 0, -1):
             self.instruction.emit(("cd", i, index - 1))
             self.lock.acquire()
             if not self.alive:

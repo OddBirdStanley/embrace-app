@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtGui import QMovie
 from threading import Lock
 import ble
 import mr
@@ -11,6 +12,7 @@ import numpy as np
 
 ROOT_PATH = os.path.dirname(__file__)
 RECORD_PATH = os.path.join(ROOT_PATH, "record")
+ASSET_PATH = os.path.join(ROOT_PATH, "assets")
 if not os.path.exists(RECORD_PATH):
     os.mkdir(RECORD_PATH)
 MAX_SIG = 1e5
@@ -135,6 +137,13 @@ class RecordDialog(QDialog):
         self.curr = QLabel("--")
         self.curr.setStyleSheet("font-size: 30px;")
         self.curr.setAlignment(Qt.AlignCenter)
+        self.curr_movie = QLabel()
+        self.curr_movie.setFixedHeight(400)
+        self.curr_movie.setFixedWidth(300)
+        self.curr_movie.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.curr_movie_obj = None
+        curr_movie_layout = QHBoxLayout()
+        curr_movie_layout.addWidget(self.curr_movie, Qt.AlignCenter)
         self.next = QLabel("--")
         self.next.setStyleSheet("font-size: 15px;")
         self.next.setAlignment(Qt.AlignCenter)
@@ -142,6 +151,7 @@ class RecordDialog(QDialog):
         self.counter.setStyleSheet("font-size: 15px;")
         self.counter.setAlignment(Qt.AlignCenter)
         root_layout.addWidget(self.curr)
+        root_layout.addLayout(curr_movie_layout)
         root_layout.addWidget(self.next)
         root_layout.addWidget(self.counter)
         self.control = QPushButton("Start")
@@ -228,6 +238,12 @@ class RecordDialog(QDialog):
         if instruction[0] == "cd":
             self.curr.setText(str(instruction[1]))
             self.next.setText(f"Next: {self._get_gesture_name(instruction[2])}")
+
+            if instruction[1] == 3:
+                self.curr_movie_obj = QMovie(os.path.join(ASSET_PATH, f"{self._get_gesture_name(instruction[2])}.gif"))
+                self.curr_movie.setMovie(self.curr_movie_obj)
+                self.curr_movie_obj.start()
+                self.curr_movie.show()
         elif instruction[0] == "use":
             self.lock.acquire()
             self.active_recording = True
@@ -235,6 +251,16 @@ class RecordDialog(QDialog):
             self.lock.release()
 
             self.curr.setText(f"{self._get_gesture_name(instruction[1])} {instruction[3]}")
+            if instruction[1] < 0 and instruction[3] == 3:
+                self.curr_movie_obj = QMovie(os.path.join(ASSET_PATH, f"{self._get_gesture_name(instruction[2])}.gif"))
+                self.curr_movie.setMovie(self.curr_movie_obj)
+                self.curr_movie_obj.start()
+                self.curr_movie.show()
+            elif instruction[1] >= 0 and instruction[3] == 1:
+                try:
+                    self.curr_movie.stop()
+                except:
+                    pass
             self.next.setText(f"Next: {self._get_gesture_name(instruction[2])}")
             self.lock.acquire()
             self.counter.setText(f"Samples: {len(self.memory)}")
