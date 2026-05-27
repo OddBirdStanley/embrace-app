@@ -17,8 +17,9 @@ if not os.path.exists(RECORD_PATH):
     os.mkdir(RECORD_PATH)
 MAX_SIG = 1e5
 MIN_SIG = -1e5
-#GESTURES = ["Extend", "Fist", "Flex", "Radial", "Rest", "Ulnar"]
 GESTURES = ["Extend", "Fist", "Flex", "Pronation", "Radial", "Rest", "Supination", "Ulnar"]
+
+DEBUG_RES = os.getenv("EMBRACE_RES") == "1"
 
 class EmbraceState:
     def __init__(self, gestures):
@@ -252,7 +253,7 @@ class RecordDialog(QDialog):
 
             self.curr.setText(f"{self._get_gesture_name(instruction[1])} {instruction[3]}")
             if instruction[1] < 0 and instruction[3] == 3:
-                self.curr_movie_obj = QMovie(os.path.join(ASSET_PATH, f"{self._get_gesture_name(instruction[2])}.gif"))
+                self.curr_movie_obj = QMovie(os.path.join(ASSET_PATH, f"{self._get_gesture_name(instruction[2])}.gif"), parent=self)
                 self.curr_movie.setMovie(self.curr_movie_obj)
                 self.curr_movie_obj.start()
                 self.curr_movie.show()
@@ -515,8 +516,25 @@ class EmbraceApp(QWidget):
         self.record_blocking = False
 
 if __name__ == "__main__":
+    if DEBUG_RES:
+        import res
+        res_thread = res.ResThread()
+        res_thread.start()
     app = QApplication([])
     app.setApplicationDisplayName("Embrace")
     window = EmbraceApp()
     window.show()
     app.exec()
+    if DEBUG_RES:
+        res_thread.stop()
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots()
+        ax.plot(res_thread.C, res_thread.T, color="tab:red", label="Thread Count")
+        ax.set_xlabel("Time")
+        ax.set_ylabel("Thread Count")
+        axx = ax.twinx()
+        axx.plot(res_thread.C, res_thread.M, color="tab:blue", label="Memory (KB)")
+        axx.set_ylabel("Memory (KB)")
+        fig.legend(loc="upper right", bbox_to_anchor=(1,1), bbox_transform=ax.transAxes)
+        plt.suptitle("Embrace Resources Monitor")
+        plt.show()

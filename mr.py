@@ -1,5 +1,6 @@
 import subprocess
 import time
+import os
 from threading import Lock
 import numpy as np
 from PySide6.QtCore import QThread, Signal, Slot
@@ -10,6 +11,8 @@ from openmr.board_metadata import get_emg_channels
 CONNECT_FAILURE = 0
 CONNECT_SUCCESS = 1
 CONNECT_NORMAL = 2
+
+DEBUG_MRFZ = os.getenv("EMBRACE_MRFZ") == "1"
 
 class MindRoveRecord(QThread):
     instruction = Signal(object)
@@ -113,6 +116,8 @@ class MindRoveConnection(QThread):
                 data = self.stream.get_data()[self._channels, :].transpose()
                 if data.shape[0] > 0:
                     self.update.emit(data)
+                elif DEBUG_MRFZ:
+                    self.update.emit(np.zeros((100, 8)))
             except:
                 self.lock.acquire()
                 self.has_error = True
