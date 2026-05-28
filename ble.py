@@ -45,7 +45,7 @@ class BLEConnection(QThread):
         self.q = deque()
         self.lock = Lock()
         self.destroyed.connect(self.cleanup)
-        self.deposit.connect(self.handle_deposit)
+        self.deposit.connect(self.handle)
     
     @Slot(int)
     def handle(self, i):
