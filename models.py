@@ -10,16 +10,53 @@ BIN_PATH = os.path.join(os.path.dirname(__file__), "bin")
 
 from PySide6.QtCore import QThread, Signal, Slot
 
-class CNNLSTMClassifier8(nn.Module):
+class CNNLSTMClassifier(nn.Module):
+    MEAN = np.array([
+        -2.2562135200132616e-05,
+        -2.056811354123056e-05,
+        -4.008084943052381e-06,
+        3.388740515219979e-05,
+        -9.689700164017268e-06,
+        9.724450501380488e-05,
+        -1.0648847819538787e-05,
+        -7.948076017783023e-06,
+        0.4911661148071289,
+        -0.011800535023212433,
+        -0.08037097007036209,
+        -0.06681600958108902,
+        -0.09873779118061066,
+        -0.12540459632873535,
+        -0.20253531634807587,
+        -0.006005008239299059
+    ])
+    STD = np.array([
+        939.9639282226562,
+        64.4369125366211,
+        70.32238006591797,
+        102.73607635498047,
+        168.22476196289062,
+        190.44500732421875,
+        230.51136779785156,
+        133.44361877441406,
+        65.2059326171875,
+        62.25019454956055,
+        72.54779815673828,
+        77.90699768066406,
+        102.0621109008789,
+        125.46758270263672,
+        35.52862548828125,
+        34.05629348754883
+    ])
+
     def __init__(
         self,
-        input_size: int = 8,
+        input_size: int = 16,
         num_classes: int = 8,
-        conv_channels: list[int] | tuple[int, ...] = (48, 96),
+        conv_channels: list[int] | tuple[int, ...] = (64, 128),
         kernel_size: int = 7,
-        lstm_hidden_size: int = 96,
+        lstm_hidden_size: int = 128,
         lstm_num_layers: int = 1,
-        dropout: float = 0.25,
+        dropout: float = 0.15,
         bidirectional: bool = True,
     ):
         """
@@ -87,7 +124,22 @@ class CNNLSTMClassifier8(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(128, num_classes)
         )
-
+    
+    def remove_window_dc_offset(self, X):
+        window_mean = np.mean(X, axis=1, keepdims=True)
+        return (X - window_mean).astype(np.float32)
+    def add_delta_features(self, X):
+        delta = np.diff(X, axis=1, prepend=X[:, :1, :])
+        return np.concatenate([X, delta], axis=2).astype(np.float32)
+    def prepare_model_features(self, X):
+        X_centered = self.remove_window_dc_offset(X)
+        X_features = self.add_delta_features(X_centered)
+        return X_features.astype(np.float32)
+    def apply_channel_standardization(self, X):
+        return ((X - self.MEAN[None, None, :]) / self.STD[None, None, :]).astype(np.float32)
+    def pre(self, X):
+        return self.apply_channel_standardization(self.prepare_model_features(X))
+    
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (batch, seq_len, num_channels)
 
@@ -116,10 +168,10 @@ class CNNLSTMClassifier8(nn.Module):
         return logits
 
 MODEL_CONFIG = {
-    "Tony-8": {
-        "clazz": CNNLSTMClassifier8,
-        "weights": "best_model_8.pt",
-        "window": 150,
+    "SuperTony": {
+        "clazz": CNNLSTMClassifier,
+        "weights": "best_model_v10.pt",
+        "window": 200,
         "step": 25
     }
 }
@@ -137,7 +189,7 @@ class ModelManager:
         self.model.load_state_dict(torch.load(os.path.join(BIN_PATH, self.config["weights"])))
     
     def predict(self, sig):
-        return self.model(torch.tensor(sig).to(self.dev)).cpu().detach().numpy()
+        return self.model(torch.tensor(self.model.pre(sig)).to(self.dev)).cpu().detach().numpy()
 
 class ModelThread(QThread):
     deposit = Signal(object)
