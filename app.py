@@ -502,13 +502,19 @@ class EmbraceApp(QWidget):
             self.sigs[i].setFormat(str(int(last_row[i])))
             self.sigs[i].setValue(max(min(MAX_SIG, last_row[i]), MIN_SIG))
         
-    @Slot(int)
-    def model_callback(self, i):
+    @Slot(object)
+    def model_callback(self, data):
+        i, v = data
         if not self.record_blocking:
             for w in self.preds:
                 w.setStyleSheet(styles.PRED_DIM)
             if 0 <= i < len(self.state.gestures):
-                self.preds[i].setStyleSheet(styles.PRED_LIT)
+                if v > 0.9:
+                    self.preds[i].setStyleSheet(styles.PRED_HIGH)
+                elif v > 0.5:
+                    self.preds[i].setStyleSheet(styles.PRED_MID)
+                else:
+                    self.preds[i].setStyleSheet(styles.PRED_LOW)
             if self.state.ble_connection is not None:
                 self.state.ble_connection.deposit.emit(i)
     

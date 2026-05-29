@@ -166,7 +166,7 @@ class CNNLSTMClassifier(nn.Module):
         features = torch.cat([avg_pool, max_pool], dim=1)
 
         logits = self.head(features)
-        return logits
+        return torch.softmax(logits, dim=1)
 
 with open(os.path.join(BIN_PATH, "model_config.json")) as f:
     MODEL_CONFIG = json.loads(f.read())
@@ -193,7 +193,7 @@ class ModelManager:
 
 class ModelThread(QThread):
     deposit = Signal(object)
-    predicted = Signal(int)
+    predicted = Signal(object)
     stop = Signal()
 
     deposit_train = Signal(object)
@@ -262,7 +262,9 @@ class ModelThread(QThread):
             if samples is not None:
                 _samples = np.vstack(samples, dtype=np.float32)[np.newaxis, :]
                 with self.lock:
-                    self.predicted.emit(int(np.argmax(self.manager.predict(_samples))))
+                    probs = self.manager.predict(_samples)
+                    index = int(np.argmax(probs))
+                    self.predicted.emit((index, probs[0][index]))
             if samples_train_sig is not None:
                 _samples = np.vstack(samples_train_sig, dtype=np.float32)[np.newaxis, :]
                 with self.lock:

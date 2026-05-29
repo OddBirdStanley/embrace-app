@@ -1,9 +1,21 @@
 from PySide6.QtWidgets import QFrame
 
-PRED_LIT = """
+PRED_HIGH = """
 border-radius: 5px;
 border: 1px solid black;
 background-color: green;
+"""
+
+PRED_MID = """
+border-radius: 5px;
+border: 1px solid black;
+background-color: orange;
+"""
+
+PRED_LOW = """
+border-radius: 5px;
+border: 1px solid black;
+background-color: red;
 """
 
 PRED_DIM = """
