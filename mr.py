@@ -30,20 +30,17 @@ class MindRoveRecord(QThread):
         self.destroyed.connect(self.cleanup)
     
     def cleanup(self):
-        self.lock.acquire()
-        self.alive = False
-        self.lock.release()
+        with self.lock:
+            self.alive = False
     
     def run(self):
         index = randint(1, self.type_count)
         for i in range(self.interval, 0, -1):
             self.instruction.emit(("cd", i, index - 1))
-            self.lock.acquire()
-            if not self.alive:
-                self.end.emit()
-                self.lock.release()
-                return
-            self.lock.release()
+            with self.lock:
+                if not self.alive:
+                    self.end.emit()
+                    return
             time.sleep(1)
 
         while True:
@@ -53,18 +50,14 @@ class MindRoveRecord(QThread):
                 if index_next > self.type_count:
                     index_next = 1
             for i in range(self.interval, 0, -1):
-                self.lock.acquire()
-                if not self.alive:
-                    self.lock.release()
-                    break
-                self.lock.release()
+                with self.lock:
+                    if not self.alive:
+                        break
                 self.instruction.emit(("use", index - 1, index_next - 1, i))
                 time.sleep(1)
-            self.lock.acquire()
-            if not self.alive:
-                self.lock.release()
-                break
-            self.lock.release()
+            with self.lock:
+                if not self.alive:
+                    break
             index = index_next
         
         self.end.emit()
@@ -90,10 +83,9 @@ class MindRoveConnection(QThread):
             self.stream.stop()
         except:
             pass
-        self.lock.acquire()
-        self.alive = False
-        self.cleanup_complete.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)
-        self.lock.release()
+        with self.lock:
+            self.alive = False
+            self.cleanup_complete.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)
 
     def run(self):
         try:
@@ -107,24 +99,21 @@ class MindRoveConnection(QThread):
         self.connected.emit(CONNECT_SUCCESS)
 
         while True:
-            self.lock.acquire()
-            if not self.alive:
-                self.lock.release()
-                break
-            self.lock.release()
+            with self.lock:
+                if not self.alive:
+                    break
             try:
                 data = self.stream.get_data()[self._channels, :].transpose()
                 if data.shape[0] > 0:
                     self.update.emit(data)
                 elif DEBUG_MRFZ:
-                    self.update.emit(np.zeros((100, 8)))
+                    self.update.emit(np.zeros((randint(50, 150), 8)))
             except:
-                self.lock.acquire()
-                self.has_error = True
-                self.lock.release()
+                with self.lock:
+                    self.has_error = True
                 break
             time.sleep(0.1)
 
-        self.lock.acquire()
-        self.connected.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)
-        self.lock.release()
+        
+        with self.lock:
+            self.connected.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)

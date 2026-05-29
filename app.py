@@ -155,12 +155,14 @@ class RecordDialog(QDialog):
         root_layout.addLayout(curr_movie_layout)
         root_layout.addWidget(self.next)
         root_layout.addWidget(self.counter)
+        self.control_ft = QCheckBox("Fine Tune")
         self.control = QPushButton("Start")
         self.control.clicked.connect(self.record_control)
         self.save_button = QPushButton("Save")
         self.save_button.clicked.connect(self.save)
         self.close_button = QPushButton("Close")
         self.close_button.clicked.connect(self.close)
+        root_layout.addWidget(self.control_ft)
         root_layout.addWidget(self.control)
         root_layout.addWidget(self.save_button)
         root_layout.addWidget(self.close_button)
@@ -191,23 +193,23 @@ class RecordDialog(QDialog):
 
     @Slot(object)
     def handle_deposit(self, data):
-        self.lock.acquire()
-        if self.active_recording:
-            self.memory = np.vstack((self.memory, data))
-            self.labels = np.concatenate((self.labels, np.repeat(self.curr_index if self.curr_index >= 0 else np.nan, len(data))))
-        self.lock.release()
+        with self.lock:
+            if self.active_recording:
+                self.memory = np.vstack((self.memory, data))
+                self.labels = np.concatenate((self.labels, np.repeat(self.curr_index if self.curr_index >= 0 else np.nan, len(data))))
     
     def record_control(self):
         if not self.recording:
-            self.lock.acquire()
-            self.memory = np.empty((0, 8))
-            self.labels = np.array([])
-            self.lock.release()
+            with self.lock:
+                self.memory = np.empty((0, 8))
+                self.labels = np.array([])
             self.app.record_thread = mr.MindRoveRecord(len(self.app.state.gestures))
             self.app.record_thread.instruction.connect(self.instruction_callback)
             self.app.record_thread.end.connect(self.record_stop_wait)
             self.save_button.setEnabled(False)
             self.close_button.setEnabled(False)
+            self.control_ft.setEnabled(False)
+            self.app.record_train = self.control_ft.checkState() == Qt.Checked
             self.control.setText("Stop")
             self.counter.setText("--")
             self.recording = True
@@ -216,16 +218,17 @@ class RecordDialog(QDialog):
             self.app.record_thread.stop.emit()
     
     def record_stop_wait(self):
-        self.lock.acquire()
-        self.active_recording = False
-        self.curr_index = -1
-        self.memory = np.hstack((self.memory, self.labels.reshape(-1, 1)))
-        self.lock.release()
+        with self.lock:
+            self.active_recording = False
+            self.curr_index = -1
+            self.memory = np.hstack((self.memory, self.labels.reshape(-1, 1)))
 
         self.recording = False
+        self.app.record_train = False
         self.curr.setText("--")
         self.next.setText("--")
         self.control.setText("Start")
+        self.control_ft.setEnabled(True)
         self.save_button.setEnabled(True)
         self.close_button.setEnabled(True)
     
@@ -246,10 +249,9 @@ class RecordDialog(QDialog):
                 self.curr_movie_obj.start()
                 self.curr_movie.show()
         elif instruction[0] == "use":
-            self.lock.acquire()
-            self.active_recording = True
-            self.curr_index = instruction[1]
-            self.lock.release()
+            with self.lock:
+                self.active_recording = True
+                self.curr_index = instruction[1]
 
             self.curr.setText(f"{self._get_gesture_name(instruction[1])} {instruction[3]}")
             if instruction[1] < 0 and instruction[3] == 3:
@@ -263,9 +265,8 @@ class RecordDialog(QDialog):
                 except:
                     pass
             self.next.setText(f"Next: {self._get_gesture_name(instruction[2])}")
-            self.lock.acquire()
-            self.counter.setText(f"Samples: {len(self.memory)}")
-            self.lock.release()
+            with self.lock:
+                self.counter.setText(f"Samples: {len(self.memory)}")
 
     def closeEvent(self, event):
         if self.app.record_thread is not None:
@@ -319,8 +320,8 @@ class EmbraceApp(QWidget):
         model_choose_label = QLabel("Model:")
         self.model_choose_menu = QComboBox()
         self.model_choose_menu.addItems(models.MODEL_CONFIG.keys())
-        #self.model_choose_menu.currentIndexChanged(self.change_model)
-        self.state.model_manager.set_model(self.model_choose_menu.currentText())
+        self.model_choose_menu.currentTextChanged.connect(self.change_model)
+        self.model_thread.set_model(self.model_choose_menu.currentText())
         self.model_thread.start()
         model_choose.addWidget(model_choose_label)
         model_choose.addWidget(self.model_choose_menu)
@@ -364,6 +365,7 @@ class EmbraceApp(QWidget):
         root_layout.addLayout(pred_layout)
 
         self.record_blocking = False
+        self.record_train = False
     
     def closeEvent(self, event):
         if self.record_thread is not None:
@@ -487,9 +489,13 @@ class EmbraceApp(QWidget):
     
     @Slot(object)
     def update_mr(self, data):
-        last_row = data[-1, :]
+        last_row = data[-1, :] # only one sample displayed on GUI
         if self.record_blocking:
+            for w in self.preds:
+                w.setStyleSheet(styles.PRED_INACTIVE)
             self.record_dialog.deposit.emit(data)
+            if self.record_train and self.record_dialog.curr_index >= 0: # skip training on null label
+                self.model_thread.deposit_train.emit((data, self.record_dialog.curr_index))
         else:
             self.model_thread.deposit.emit(data)
         for i in range(8):
@@ -498,7 +504,7 @@ class EmbraceApp(QWidget):
         
     @Slot(int)
     def model_callback(self, i):
-        if self.mindrove_record.isEnabled():
+        if not self.record_blocking:
             for w in self.preds:
                 w.setStyleSheet(styles.PRED_DIM)
             if 0 <= i < len(self.state.gestures):
@@ -513,6 +519,7 @@ class EmbraceApp(QWidget):
         self.record_dialog.show()
 
     def mindrove_record_callback(self):
+        self.model_thread.stop_train()
         self.record_blocking = False
 
 if __name__ == "__main__":

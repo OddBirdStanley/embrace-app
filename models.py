@@ -3,6 +3,7 @@ import torch.nn as nn
 from collections import deque
 import gc
 import os
+import json
 import time
 import numpy as np
 from threading import Lock
@@ -167,15 +168,11 @@ class CNNLSTMClassifier(nn.Module):
         logits = self.head(features)
         return logits
 
-MODEL_CONFIG = {
-    "SuperTony": {
-        "clazz": CNNLSTMClassifier,
-        "weights": "best_model_v10.pt",
-        "window": 200,
-        "step": 25
-    }
-}
+with open(os.path.join(BIN_PATH, "model_config.json")) as f:
+    MODEL_CONFIG = json.loads(f.read())
+MODEL_CLASS_MAPPING = {"cnn-lstm": CNNLSTMClassifier}
 
+from plug import _train
 class ModelManager:
     def __init__(self):
         self.dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -183,18 +180,23 @@ class ModelManager:
     
     def set_model(self, name):
         self.config = MODEL_CONFIG[name]
-        self.model = self.config["clazz"]().to(self.dev)
+        self.model = MODEL_CLASS_MAPPING[self.config["clazz"]]().to(self.dev)
         gc.collect()
         torch.cuda.empty_cache()
         self.model.load_state_dict(torch.load(os.path.join(BIN_PATH, self.config["weights"])))
     
     def predict(self, sig):
         return self.model(torch.tensor(self.model.pre(sig)).to(self.dev)).cpu().detach().numpy()
+    
+    def train(self, sig, label):
+        _train(self.model, sig, label)
 
 class ModelThread(QThread):
     deposit = Signal(object)
     predicted = Signal(int)
     stop = Signal()
+
+    deposit_train = Signal(object)
 
     def __init__(self, manager):
         super().__init__()
@@ -202,40 +204,69 @@ class ModelThread(QThread):
         self.manager = manager
         self.alive = True
         self.q = deque()
+        self.q_train = deque()
         self.lock = Lock()
-
         self.deposit.connect(self.handle_deposit)
         self.stop.connect(self.cleanup)
+        self.deposit_train.connect(self.handle_deposit_train)
+    
+    def set_model(self, name):
+        with self.lock:
+            self.manager.set_model(name)
     
     def handle_deposit(self, data):
-        self.lock.acquire()
-        for i in range(data.shape[0]):
-            self.q.append(data[i].copy())
-        self.lock.release()
+        with self.lock:
+            for i in range(data.shape[0]):
+                self.q.append(data[i].copy())
     
+    def handle_deposit_train(self, data):
+        sig, label = data
+        with self.lock:
+            for i in range(sig.shape[0]):
+                self.q_train.append((sig[i].copy(), label))
+    
+    def stop_train(self):
+        with self.lock:
+            self.q_train.clear()
+
     def cleanup(self):
-        self.lock.acquire()
-        self.alive = False
-        self.lock.release()
+        with self.lock:
+            self.alive = False
     
     def run(self):
         while True:
-            self.lock.acquire()
-            if not self.alive:
-                self.lock.release()
-                break
-            samples = None
-            if len(self.q) >= self.manager.config["window"]:
-                samples = []
-                for i in range(self.manager.config["window"]):
-                    samples.append(self.q.popleft())
-                for i in range(len(samples) - 1, self.manager.config["step"] - 1, -1):
-                    self.q.appendleft(samples[i].copy())
-            self.lock.release()
+            with self.lock:
+                if not self.alive:
+                    break
+                
+                samples = None
+                if len(self.q) >= self.manager.config["window"]:
+                    samples = []
+                    for i in range(self.manager.config["window"]):
+                        samples.append(self.q.popleft())
+                    for i in range(len(samples) - 1, self.manager.config["step"] - 1, -1):
+                        self.q.appendleft(samples[i].copy())
+                
+                samples_train_sig = None
+                samples_train_label = None
+                if len(self.q_train) >= self.manager.config["window"]:
+                    samples_train_sig = []
+                    samples_train_label = []
+                    for i in range(self.manager.config["window"]):
+                        s, l = self.q_train.popleft()
+                        samples_train_sig.append(s)
+                        samples_train_label.append(l)
+                    for i in range(len(samples_train_sig) - 1, self.manager.config["step"] - 1, -1):
+                        self.q_train.appendleft((samples_train_sig[i].copy(), samples_train_label[i]))
+            
             if samples is not None:
-                samples = np.vstack(samples, dtype=np.float32)
-                samples = samples[np.newaxis, :]
-                self.predicted.emit(int(np.argmax(self.manager.predict(samples))))
+                _samples = np.vstack(samples, dtype=np.float32)[np.newaxis, :]
+                with self.lock:
+                    self.predicted.emit(int(np.argmax(self.manager.predict(_samples))))
+            if samples_train_sig is not None:
+                _samples = np.vstack(samples_train_sig, dtype=np.float32)[np.newaxis, :]
+                with self.lock:
+                    self.manager.train(_samples, np.array(samples_train_label))
             time.sleep(0.1)
 
     

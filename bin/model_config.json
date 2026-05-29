@@ -1,0 +1,14 @@
+{
+    "SuperTony": {
+        "clazz": "cnn-lstm",
+        "weights": "best_model_v10.pt",
+        "window": 200,
+        "step": 25
+    },
+    "SuperTony-Backup": {
+        "clazz": "cnn-lstm",
+        "weights": "best_model_v10.backup.pt",
+        "window": 200,
+        "step": 25
+    }
+}

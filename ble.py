@@ -49,19 +49,17 @@ class BLEConnection(QThread):
     
     @Slot(int)
     def handle(self, i):
-        self.lock.acquire()
-        self.q.append(i)
-        self.lock.release()
+        with self.lock:
+            self.q.append(i)
     
     def cleanup(self):
         try:
             asyncio.run(self.client.disconnect())
         except:
             pass
-        self.lock.acquire()
-        self.alive = False
-        self.cleanup_complete.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)
-        self.lock.release()
+        with self.lock:
+            self.alive = False
+            self.cleanup_complete.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)
 
     def run(self):
         # connect to BLE
@@ -75,27 +73,23 @@ class BLEConnection(QThread):
 
         # send test message
         #self.send(TEST)
-        self.lock.acquire()
-        if not self.alive:
-            self.has_error = True
-            self.connected.emit(CONNECT_FAILURE)
-            return # destroyed auto-cleanup
-        self.lock.release()
+        with self.lock:
+            if not self.alive:
+                self.has_error = True
+                self.connected.emit(CONNECT_FAILURE)
+                return # destroyed auto-cleanup
         self.connected.emit(CONNECT_SUCCESS)
 
         while True:
-            self.lock.acquire()
-            if not self.alive:
-                self.lock.release()
-                break
-            while len(self.q) > 0:
-                self.send(bytearray(self.q.popleft()))
-            self.lock.release()
+            with self.lock():
+                if not self.alive:
+                    break
+                while len(self.q) > 0:
+                    self.send(bytearray(self.q.popleft()))
             time.sleep(1)
         
-        self.lock.acquire()
-        self.connected.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)
-        self.lock.release()
+        with self.lock:
+            self.connected.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)
     
     async def _send(self, data):
         try:
@@ -108,8 +102,7 @@ class BLEConnection(QThread):
         return True
 
     def send(self, data):
-        self.lock.acquire()
-        if not asyncio.run(self._send(data)):
-            self.alive = False
-            self.has_error = True
-        self.lock.release()
+        with self.lock:
+            if not asyncio.run(self._send(data)):
+                self.alive = False
+                self.has_error = True
