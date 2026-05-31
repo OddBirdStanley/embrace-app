@@ -68,12 +68,14 @@ class BLEConnection(QThread):
             asyncio.run(self.client.connect(timeout=5))
         except:
             self.has_error = True
+            print("err source 1")
             self.connected.emit(CONNECT_FAILURE)
             return
 
         with self.lock:
             if not self.alive:
                 self.has_error = True
+                print("err source 2")
                 self.connected.emit(CONNECT_FAILURE)
                 return # destroyed auto-cleanup
         self.connected.emit(CONNECT_SUCCESS)
@@ -90,7 +92,6 @@ class BLEConnection(QThread):
             self.connected.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)
     
     async def _send(self, data):
-        return True
         try:
             await self.client.write_gatt_char(
                 CHARACTERISTIC,
@@ -102,5 +103,6 @@ class BLEConnection(QThread):
 
     def send(self, data):
         if not asyncio.run(self._send(data)):
+            print("err source 3")
             self.alive = False
             self.has_error = True
