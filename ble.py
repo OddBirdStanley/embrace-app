@@ -64,13 +64,15 @@ class BLEConnection(QThread):
     def run(self):
         # connect to BLE
         self.client = bleak.BleakClient(self.address)
+        asyncio.run(self.client.connect(timeout=1000))
+        """
         try:
             asyncio.run(self.client.connect(timeout=5))
-        except Exception as e:
-            print(e)
+        except:
             self.has_error = True
             self.connected.emit(CONNECT_FAILURE)
             return
+        """
 
         with self.lock:
             if not self.alive:
