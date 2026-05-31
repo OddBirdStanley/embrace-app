@@ -66,16 +66,15 @@ class BLEConnection(QThread):
         self.client = bleak.BleakClient(self.address)
         try:
             asyncio.run(self.client.connect(timeout=5))
-        except:
+        except Exception as e:
+            print(e)
             self.has_error = True
-            print("err source 1")
             self.connected.emit(CONNECT_FAILURE)
             return
 
         with self.lock:
             if not self.alive:
                 self.has_error = True
-                print("err source 2")
                 self.connected.emit(CONNECT_FAILURE)
                 return # destroyed auto-cleanup
         self.connected.emit(CONNECT_SUCCESS)
@@ -103,6 +102,5 @@ class BLEConnection(QThread):
 
     def send(self, data):
         if not asyncio.run(self._send(data)):
-            print("err source 3")
             self.alive = False
             self.has_error = True
