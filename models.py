@@ -209,12 +209,13 @@ class ModelThread(QThread):
         self.deposit.connect(self.handle_deposit)
         self.stop.connect(self.cleanup)
         self.fine_tune.connect(self.handle_fine_tune)
+
+        self.fine_tune_data = None
     
     @Slot(object)
     def handle_fine_tune(self, arr):
         with self.lock:
-            self.manager.train(arr)
-        self.fine_tune_end.emit()
+            self.fine_tune_data = arr
     
     def set_model(self, name):
         with self.lock:
@@ -234,6 +235,11 @@ class ModelThread(QThread):
             with self.lock:
                 if not self.alive:
                     break
+                
+                if self.fine_tune_data is not None:
+                    self.manager.train(self.fine_tune_data)
+                    self.fine_tune_data = None
+                    self.fine_tune_end.emit()
                 
                 samples = None
                 if len(self.q) >= self.manager.config["window"]:

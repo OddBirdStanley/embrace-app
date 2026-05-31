@@ -2,6 +2,7 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QMovie
 from threading import Lock
+from collections import deque
 import ble
 import mr
 import models
@@ -9,6 +10,7 @@ import styles
 import os
 import datetime
 import numpy as np
+import time
 
 ROOT_PATH = os.path.dirname(__file__)
 RECORD_PATH = os.path.join(ROOT_PATH, "record")
@@ -20,6 +22,9 @@ MIN_SIG = -1e5
 GESTURES = ["Extend", "Fist", "Flex", "Pronation", "Radial", "Rest", "Supination", "Ulnar"]
 
 DEBUG_RES = os.getenv("EMBRACE_RES") == "1"
+
+def time_ms():
+    return int(time.time() * 1000)
 
 class EmbraceState:
     def __init__(self, gestures):
@@ -204,17 +209,19 @@ class RecordDialog(QDialog):
             error.show()
 
     def fine_tune(self):
+        self.control.setEnabled(False)
         self.save_button.setEnabled(False)
         self.ft_button.setEnabled(False)
-        if len(self.memory) > 0:
+        if len(np.unique(self.memory[:, -1])) == len(self.app.state.gestures) + 1:
             self.app.model_thread.fine_tune.emit(self.memory)
         else:
             error = QMessageBox(self)
             error.setIcon(QMessageBox.Icon.Warning)
             error.setWindowTitle("Warning")
-            error.setText("No samples remaining to save.")
+            error.setText("Fine tuning requires you to record every gesture at least once.")
             error.setStandardButtons(QMessageBox.StandardButton.Ok)
             error.show()
+            self.control.setEnabled(True)
             self.save_button.setEnabled(True)
             self.ft_button.setEnabled(True)
     
@@ -225,6 +232,7 @@ class RecordDialog(QDialog):
         msg.setText("Fine tuning has finished.")
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg.show()
+        self.control.setEnabled(True)
         self.save_button.setEnabled(True)
         self.ft_button.setEnabled(True)
         self.memory = np.empty((0, 8))
@@ -411,6 +419,8 @@ class EmbraceApp(QWidget):
         self.record_blocking = False
 
         self.arm_test_callables = [self._arm_test_callable(i) for i in range(len(self.state.gestures))]
+
+        self.recent_predictions = deque()
     
     def _arm_test_callable(self, i):
         def _arm_test_callable_inner():
@@ -564,15 +574,20 @@ class EmbraceApp(QWidget):
         if not self.record_blocking:
             for w in self.preds:
                 w.setStyleSheet(styles.PRED_DIM)
-            if 0 <= i < len(self.state.gestures):
-                if v > 0.75:
-                    self.preds[i].setStyleSheet(styles.PRED_HIGH)
-                elif v > 0.5:
-                    self.preds[i].setStyleSheet(styles.PRED_MID)
-                else:
-                    self.preds[i].setStyleSheet(styles.PRED_LOW)
-            if self.state.ble_connection is not None:
-                self.state.ble_connection.deposit.emit(i)
+            if 0 <= i < len(self.state.gestures) and v > 0.7:
+                if v > 0.7:
+                    now = time_ms()
+                    self.recent_predictions.append((now, i))
+                    while len(self.recent_predictions) > 0 and now - self.recent_predictions[0][0] > 500:
+                        self.recent_predictions.popleft()
+                    votes = 0
+                    for t, j in self.recent_predictions:
+                        if j == i:
+                            votes += 1
+                    if votes * 2 >= len(self.recent_predictions):
+                        if self.state.ble_connection is not None:
+                            self.state.ble_connection.deposit.emit(i)
+                        self.preds[i].setStyleSheet(styles.PRED_HIGH)
     
     def mindrove_record_start(self):
         self.record_blocking = True
