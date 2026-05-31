@@ -71,8 +71,6 @@ class BLEConnection(QThread):
             self.connected.emit(CONNECT_FAILURE)
             return
 
-        # send test message
-        #self.send(TEST)
         with self.lock:
             if not self.alive:
                 self.has_error = True
@@ -81,17 +79,18 @@ class BLEConnection(QThread):
         self.connected.emit(CONNECT_SUCCESS)
 
         while True:
-            with self.lock():
+            with self.lock:
                 if not self.alive:
                     break
                 while len(self.q) > 0:
-                    self.send(bytearray(self.q.popleft()))
-            time.sleep(1)
+                    self.send(bytearray([self.q.popleft()]))
+            time.sleep(0.01)
         
         with self.lock:
             self.connected.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)
     
     async def _send(self, data):
+        return True
         try:
             await self.client.write_gatt_char(
                 CHARACTERISTIC,
@@ -102,7 +101,6 @@ class BLEConnection(QThread):
         return True
 
     def send(self, data):
-        with self.lock:
-            if not asyncio.run(self._send(data)):
-                self.alive = False
-                self.has_error = True
+        if not asyncio.run(self._send(data)):
+            self.alive = False
+            self.has_error = True

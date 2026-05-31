@@ -19,10 +19,11 @@ class MindRoveRecord(QThread):
     end = Signal()
     stop = Signal()
 
-    def __init__(self, type_count, interval=3):
+    def __init__(self, type_count, limit, interval=3):
         super().__init__()
 
         self.type_count = type_count
+        self.limit = type_count * 2 if limit else -1
         self.interval = interval
         self.alive = True
         self.lock = Lock()
@@ -43,7 +44,8 @@ class MindRoveRecord(QThread):
                     return
             time.sleep(1)
 
-        while True:
+        while self.limit != 0:
+            self.limit -= 1
             index_next = -index
             if index_next > 0:
                 index_next += 1
@@ -112,8 +114,7 @@ class MindRoveConnection(QThread):
                 with self.lock:
                     self.has_error = True
                 break
-            time.sleep(0.1)
+            time.sleep(0.01)
 
-        
         with self.lock:
             self.connected.emit(CONNECT_FAILURE if self.has_error else CONNECT_NORMAL)

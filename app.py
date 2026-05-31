@@ -87,6 +87,14 @@ class DeviceDiscoveryDialog(QDialog):
             if self.devices:
                 self.button_yes.setEnabled(True)
             self.button_refresh.setEnabled(True)
+    
+    def closeEvent(self, event):
+        try:
+            self._thread.stop.emit()
+            self._thread.wait()
+        except:
+            pass
+        super().closeEvent(event)
 
     # Abstract methods
     
@@ -155,21 +163,25 @@ class RecordDialog(QDialog):
         root_layout.addLayout(curr_movie_layout)
         root_layout.addWidget(self.next)
         root_layout.addWidget(self.counter)
-        self.control_ft = QCheckBox("Fine Tune")
+        self.control_lim = QCheckBox("Stop after 1 round")
         self.control = QPushButton("Start")
         self.control.clicked.connect(self.record_control)
         self.save_button = QPushButton("Save")
         self.save_button.clicked.connect(self.save)
+        self.ft_button = QPushButton("Fine Tune")
+        self.ft_button.clicked.connect(self.fine_tune)
         self.close_button = QPushButton("Close")
         self.close_button.clicked.connect(self.close)
-        root_layout.addWidget(self.control_ft)
+        root_layout.addWidget(self.control_lim)
         root_layout.addWidget(self.control)
         root_layout.addWidget(self.save_button)
+        root_layout.addWidget(self.ft_button)
         root_layout.addWidget(self.close_button)
 
         self.recording = False
         self.lock = Lock()
         self.deposit.connect(self.handle_deposit)
+        self.app.model_thread.fine_tune_end.connect(self.fine_tune_end)
 
         self.memory = np.empty((0, 8))
         self.labels = np.array([])
@@ -191,6 +203,33 @@ class RecordDialog(QDialog):
             error.setStandardButtons(QMessageBox.StandardButton.Ok)
             error.show()
 
+    def fine_tune(self):
+        self.save_button.setEnabled(False)
+        self.ft_button.setEnabled(False)
+        if len(self.memory) > 0:
+            self.app.model_thread.fine_tune.emit(self.memory)
+        else:
+            error = QMessageBox(self)
+            error.setIcon(QMessageBox.Icon.Warning)
+            error.setWindowTitle("Warning")
+            error.setText("No samples remaining to save.")
+            error.setStandardButtons(QMessageBox.StandardButton.Ok)
+            error.show()
+            self.save_button.setEnabled(True)
+            self.ft_button.setEnabled(True)
+    
+    def fine_tune_end(self):
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle("Success")
+        msg.setText("Fine tuning has finished.")
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.show()
+        self.save_button.setEnabled(True)
+        self.ft_button.setEnabled(True)
+        self.memory = np.empty((0, 8))
+        self.counter.setText("Samples: 0")
+
     @Slot(object)
     def handle_deposit(self, data):
         with self.lock:
@@ -203,13 +242,13 @@ class RecordDialog(QDialog):
             with self.lock:
                 self.memory = np.empty((0, 8))
                 self.labels = np.array([])
-            self.app.record_thread = mr.MindRoveRecord(len(self.app.state.gestures))
+            self.app.record_thread = mr.MindRoveRecord(len(self.app.state.gestures), self.control_lim.checkState() == Qt.Checked)
             self.app.record_thread.instruction.connect(self.instruction_callback)
             self.app.record_thread.end.connect(self.record_stop_wait)
             self.save_button.setEnabled(False)
+            self.ft_button.setEnabled(False)
             self.close_button.setEnabled(False)
-            self.control_ft.setEnabled(False)
-            self.app.record_train = self.control_ft.checkState() == Qt.Checked
+            self.control_lim.setEnabled(False)
             self.control.setText("Stop")
             self.counter.setText("--")
             self.recording = True
@@ -224,12 +263,12 @@ class RecordDialog(QDialog):
             self.memory = np.hstack((self.memory, self.labels.reshape(-1, 1)))
 
         self.recording = False
-        self.app.record_train = False
         self.curr.setText("--")
         self.next.setText("--")
         self.control.setText("Start")
-        self.control_ft.setEnabled(True)
+        self.control_lim.setEnabled(True)
         self.save_button.setEnabled(True)
+        self.ft_button.setEnabled(True)
         self.close_button.setEnabled(True)
     
     def _get_gesture_name(self, i):
@@ -344,13 +383,18 @@ class EmbraceApp(QWidget):
             sig_layout.addWidget(self.sigs[i])
 
         self.preds = [QLabel(g) for g in self.state.gestures]
+        self.pred_sims = [QPushButton("Test") for _ in self.state.gestures]
         pred_layout = QHBoxLayout()
-        for l in self.preds:
-            pred_layout.addWidget(l)
+        for l, t in zip(self.preds, self.pred_sims):
+            pred_layout_each = QVBoxLayout()
+            pred_layout_each.addWidget(l)
             l.setFixedWidth(100)
             l.setFixedHeight(100)
             l.setAlignment(Qt.AlignCenter)
             l.setStyleSheet(styles.PRED_INACTIVE)
+            pred_layout_each.addWidget(t)
+            t.setEnabled(False)
+            pred_layout.addLayout(pred_layout_each)
 
         root_layout.addLayout(control_layout)
         root_layout.addWidget(styles.make_sep())
@@ -365,7 +409,14 @@ class EmbraceApp(QWidget):
         root_layout.addLayout(pred_layout)
 
         self.record_blocking = False
-        self.record_train = False
+
+        self.arm_test_callables = [self._arm_test_callable(i) for i in range(len(self.state.gestures))]
+    
+    def _arm_test_callable(self, i):
+        def _arm_test_callable_inner():
+            if self.state.ble_connection is not None:
+                self.state.ble_connection.deposit.emit(i)
+        return _arm_test_callable_inner
     
     def closeEvent(self, event):
         if self.record_thread is not None:
@@ -434,6 +485,7 @@ class EmbraceApp(QWidget):
         self.mindrove_connect_handle = self.mindrove_connect.clicked.connect(self.mindrove_connection_start)
         self.mindrove_connect.setText("Connect")
         self.mindrove_connect.setEnabled(True)
+        self.state.mr_connection = None
         if status == mr.CONNECT_FAILURE:
             error = QMessageBox(self)
             error.setIcon(QMessageBox.Icon.Warning)
@@ -463,6 +515,9 @@ class EmbraceApp(QWidget):
             self.arm_connect.disconnect(self.arm_connect_handle)
             self.arm_connect_handle = self.arm_connect.clicked.connect(self.arm_dialog_stop)
             self.arm_connect.setEnabled(True)
+            for i in range(len(self.pred_sims)):
+                self.pred_sims[i].clicked.connect(self.arm_test_callables[i])
+                self.pred_sims[i].setEnabled(True)
         else:
             self.arm_dialog_stop()
     
@@ -479,6 +534,9 @@ class EmbraceApp(QWidget):
         self.arm_connect_handle = self.arm_connect.clicked.connect(self.arm_dialog_show)
         self.arm_connect.setText("Connect")
         self.arm_connect.setEnabled(True)
+        self.state.ble_connection = None
+        for t in self.pred_sims:
+            t.setEnabled(False)
         if status == ble.CONNECT_FAILURE:
             error = QMessageBox(self)
             error.setIcon(QMessageBox.Icon.Warning)
@@ -494,8 +552,6 @@ class EmbraceApp(QWidget):
             for w in self.preds:
                 w.setStyleSheet(styles.PRED_INACTIVE)
             self.record_dialog.deposit.emit(data)
-            if self.record_train and self.record_dialog.curr_index >= 0: # skip training on null label
-                self.model_thread.deposit_train.emit((data, self.record_dialog.curr_index))
         else:
             self.model_thread.deposit.emit(data)
         for i in range(8):
@@ -509,7 +565,7 @@ class EmbraceApp(QWidget):
             for w in self.preds:
                 w.setStyleSheet(styles.PRED_DIM)
             if 0 <= i < len(self.state.gestures):
-                if v > 0.9:
+                if v > 0.75:
                     self.preds[i].setStyleSheet(styles.PRED_HIGH)
                 elif v > 0.5:
                     self.preds[i].setStyleSheet(styles.PRED_MID)
@@ -525,7 +581,6 @@ class EmbraceApp(QWidget):
         self.record_dialog.show()
 
     def mindrove_record_callback(self):
-        self.model_thread.stop_train()
         self.record_blocking = False
 
 if __name__ == "__main__":
