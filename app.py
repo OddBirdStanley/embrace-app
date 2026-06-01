@@ -435,7 +435,7 @@ class EmbraceApp(QWidget):
         self.recent_predictions = deque()
         self.last_predicted = -1
 
-        self.tele_thread = tele.TeleThread()
+        self.tele_thread = tele.TeleThread(self)
         self.tele_thread.start()
     
     def _arm_test_callable(self, i):

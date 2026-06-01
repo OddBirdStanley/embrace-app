@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>EMBRACE Remote Control</title>
+        <style>
+            ul {
+                list-style: none;
+                padding-left: 0;
+            }
+            li {
+                margin-bottom: 20px;
+            }
+            button {
+                font-size: 30px;
+            }
+        </style>
+    </head>
+    <body>
+        <ul id="controls">
+            <li><button>Extend</button></li>
+            <li><button>Fist</button></li>
+            <li><button>Flex</button></li>
+            <li><button>Pronation</button></li>
+            <li><button>Radial</button></li>
+            <li><button>Rest</button></li>
+            <li><button>Supination</button></li>
+            <li><button>Ulnar</button></li>
+        </ul>
+        <script>
+            const el = document.getElementById("controls");
+            for(let i = 0; i < el.children.length; i++) {
+                let btn = el.children[i].children[0];
+                btn.addEventListener("click", () => {
+                    let req = new XMLHttpRequest();
+                    req.open("GET", `/control?code=${i}`, true);
+                    req.send();
+                });
+            }
+        </script>
+    </body>
+</html>
