@@ -432,7 +432,7 @@ class EMGWindowsDataset(Dataset):
 
         return x, y
 
-def prepare_loaders(sig: np.ndarray):
+def prepare_loaders(sig: np.ndarray, channel_mean: np.ndarray, channel_std: np.ndarray):
     
     #these two variables are copied from the metadata
     label_map = {
@@ -634,10 +634,11 @@ def prepare_loaders(sig: np.ndarray):
     X_train_fe = prepare_model_features(X_train)
     X_val_fe = prepare_model_features(X_val)
 
-    mean_std = fit_channel_standardizer(X_train_fe)
+    channel_mean = np.asarray(channel_mean, dtype=np.float32)
+    channel_std = np.asarray(channel_std, dtype=np.float32)
 
-    X_train_n = apply_channel_standardization(X_train_fe, *mean_std)
-    X_val_n = apply_channel_standardization(X_val_fe, *mean_std)
+    X_train_n = apply_channel_standardization(X_train_fe, channel_mean, channel_std)
+    X_val_n = apply_channel_standardization(X_val_fe, channel_mean, channel_std)
 
     num_classes = len(label_map)
 
@@ -789,7 +790,7 @@ def _train(model, sig):
     print(sig.shape)
     print(sig)
     #create loaders
-    train_loader, val_loader = prepare_loaders(sig)
+    train_loader, val_loader = prepare_loaders(sig, model.MEAN, model.STD)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
@@ -872,3 +873,5 @@ def _train(model, sig):
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
         print(f"Loaded Best Model With Best Val Macro F1={best_val_macro_f1:.4f}")
+
+    model.eval()

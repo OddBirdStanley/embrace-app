@@ -165,8 +165,7 @@ class CNNLSTMClassifier(nn.Module):
         # Combine both summaries
         features = torch.cat([avg_pool, max_pool], dim=1)
 
-        logits = self.head(features)
-        return torch.softmax(logits, dim=1)
+        return self.head(features)
 
 with open(os.path.join(BIN_PATH, "model_config.json")) as f:
     MODEL_CONFIG = json.loads(f.read())
@@ -184,9 +183,17 @@ class ModelManager:
         gc.collect()
         torch.cuda.empty_cache()
         self.model.load_state_dict(torch.load(os.path.join(BIN_PATH, self.config["weights"]), map_location=self.dev))
-    
+        self.model.eval()
+
     def predict(self, sig):
-        return self.model(torch.tensor(self.model.pre(sig)).to(self.dev)).cpu().detach().numpy()
+        self.model.eval()
+        with torch.no_grad():
+            x = torch.softmax(
+                self.model(
+                    torch.tensor(self.model.pre(sig)).to(self.dev)
+                ), dim=1
+            ).cpu().numpy()
+        return x
     
     def train(self, arr):
         _train(self.model, arr)
@@ -255,5 +262,5 @@ class ModelThread(QThread):
                     probs = self.manager.predict(_samples)
                     index = int(np.argmax(probs))
                     self.predicted.emit((index, probs[0][index]))
-            time.sleep(0.1)
+            time.sleep(0.01)
     

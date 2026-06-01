@@ -40,6 +40,8 @@ class BLEConnection(QThread):
         self.stop.connect(self.cleanup)
         self.address = address
         self.client = None
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
         self.alive = True
         self.has_error = False
         self.q = deque()
@@ -54,7 +56,8 @@ class BLEConnection(QThread):
     
     def cleanup(self):
         try:
-            asyncio.run(self.client.disconnect())
+            self.loop.run_until_complete(self.client.disconnect())
+            self.loop.close()
         except:
             pass
         with self.lock:
@@ -67,10 +70,10 @@ class BLEConnection(QThread):
         tries = 5
         while tries > 0:
             try:
-                asyncio.run(self.client.connect(timeout=10))
-                tries = -1
-            except:
+                self.loop.run_until_complete(self.client.connect(timeout=10))
                 tries -= 1
+            except:
+                tries = -1
         if tries < 0:
             self.has_error = True
             self.connected.emit(CONNECT_FAILURE)
@@ -105,6 +108,6 @@ class BLEConnection(QThread):
         return True
 
     def send(self, data):
-        if not asyncio.run(self._send(data)):
+        if not self.loop.run_until_complete(self._send(data)):
             self.alive = False
             self.has_error = True
