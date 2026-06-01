@@ -183,7 +183,7 @@ class ModelManager:
         self.model = MODEL_CLASS_MAPPING[self.config["clazz"]]().to(self.dev)
         gc.collect()
         torch.cuda.empty_cache()
-        self.model.load_state_dict(torch.load(os.path.join(BIN_PATH, self.config["weights"])))
+        self.model.load_state_dict(torch.load(os.path.join(BIN_PATH, self.config["weights"]), map_location=self.dev))
     
     def predict(self, sig):
         return self.model(torch.tensor(self.model.pre(sig)).to(self.dev)).cpu().detach().numpy()
