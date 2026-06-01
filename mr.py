@@ -11,6 +11,7 @@ from openmr.board_metadata import get_emg_channels
 CONNECT_FAILURE = 0
 CONNECT_SUCCESS = 1
 CONNECT_NORMAL = 2
+MIN_ROUNDS = 5
 
 DEBUG_MRFZ = os.getenv("EMBRACE_MRFZ") == "1"
 
@@ -23,7 +24,7 @@ class MindRoveRecord(QThread):
         super().__init__()
 
         self.type_count = type_count
-        self.limit = type_count * 2 if limit else -1
+        self.limit = type_count * 2 * MIN_ROUNDS if limit else -1
         self.interval = interval
         self.alive = True
         self.lock = Lock()

@@ -6,6 +6,7 @@ from collections import deque
 import ble
 import mr
 import models
+import tele
 import styles
 import os
 import datetime
@@ -168,7 +169,7 @@ class RecordDialog(QDialog):
         root_layout.addLayout(curr_movie_layout)
         root_layout.addWidget(self.next)
         root_layout.addWidget(self.counter)
-        self.control_lim = QCheckBox("Stop after 1 round")
+        self.control_lim = QCheckBox("Stop after 5 rounds")
         self.control = QPushButton("Start")
         self.control.clicked.connect(self.record_control)
         self.save_button = QPushButton("Save")
@@ -433,6 +434,9 @@ class EmbraceApp(QWidget):
 
         self.recent_predictions = deque()
         self.last_predicted = -1
+
+        self.tele_thread = tele.TeleThread()
+        self.tele_thread.start()
     
     def _arm_test_callable(self, i):
         def _arm_test_callable_inner():
@@ -453,6 +457,9 @@ class EmbraceApp(QWidget):
         if self.model_thread is not None:
             self.model_thread.stop.emit()
             self.model_thread.wait()
+        if self.tele_thread is not None:
+            self.tele_thread.stop.emit()
+            self.tele_thread.wait()
         super().closeEvent(event)
     
     @Slot(int)
@@ -589,13 +596,13 @@ class EmbraceApp(QWidget):
                 w.setStyleSheet(styles.PRED_DIM)
             if 0 <= i < len(self.state.gestures) and v > 0.9:
                 self.recent_predictions.append(i)
-                while len(self.recent_predictions) > 10:
+                while len(self.recent_predictions) > 20:
                     self.recent_predictions.popleft()
                 votes = 0
                 for j in self.recent_predictions:
                     if j == i:
                         votes += 1
-                if votes >= 6:
+                if (self.last_predicted == i and votes >= 12) or (self.last_predicted != i and votes >= 18):
                     if self.state.ble_connection is not None and (i != self.last_predicted or self.opt_dedup.checkState() == Qt.Checked):
                         self.last_predicted = i
                         self.state.ble_connection.deposit.emit(i)
