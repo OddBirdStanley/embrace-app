@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, Signal, Slot
-from PySide6.QtGui import QMovie
+from PySide6.QtGui import QMovie, QKeySequence
 from threading import Lock
 from collections import deque
 import ble
@@ -392,6 +392,8 @@ class EmbraceApp(QWidget):
 
         self.preds = [QLabel(g) for g in self.state.gestures]
         self.pred_sims = [QPushButton("Test") for _ in self.state.gestures]
+        for i in range(min(len(self.pred_sims), 9)):
+            self.pred_sims[i].setShortcut(QKeySequence(str(i + 1)))
         pred_layout = QHBoxLayout()
         for l, t in zip(self.preds, self.pred_sims):
             pred_layout_each = QVBoxLayout()
