@@ -416,11 +416,21 @@ class EmbraceApp(QWidget):
         root_layout.addWidget(pred_label)
         root_layout.addLayout(pred_layout)
 
+        root_layout.addWidget(styles.make_sep())
+        opt_label = QLabel("Options")
+        opt_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        root_layout.addWidget(opt_label)
+        opt_layout = QHBoxLayout()
+        self.opt_dedup = QCheckBox("Send duplicate gestures")
+        opt_layout.addWidget(self.opt_dedup)
+        root_layout.addLayout(opt_layout)
+
         self.record_blocking = False
 
         self.arm_test_callables = [self._arm_test_callable(i) for i in range(len(self.state.gestures))]
 
         self.recent_predictions = deque()
+        self.last_predicted = -1
     
     def _arm_test_callable(self, i):
         def _arm_test_callable_inner():
@@ -545,6 +555,7 @@ class EmbraceApp(QWidget):
         self.arm_connect.setText("Connect")
         self.arm_connect.setEnabled(True)
         self.state.ble_connection = None
+        self.last_predicted = -1
         for t in self.pred_sims:
             t.setEnabled(False)
         if status == ble.CONNECT_FAILURE:
@@ -583,7 +594,8 @@ class EmbraceApp(QWidget):
                     if j == i:
                         votes += 1
                 if votes >= 6:
-                    if self.state.ble_connection is not None:
+                    if self.state.ble_connection is not None and (i != self.last_predicted or self.opt_dedup.checkState() == Qt.Checked):
+                        self.last_predicted = i
                         self.state.ble_connection.deposit.emit(i)
                     self.preds[i].setStyleSheet(styles.PRED_HIGH)
     
