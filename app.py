@@ -574,20 +574,19 @@ class EmbraceApp(QWidget):
         if not self.record_blocking:
             for w in self.preds:
                 w.setStyleSheet(styles.PRED_DIM)
-            if 0 <= i < len(self.state.gestures) and v > 0.7:
-                if v > 0.7:
-                    now = time_ms()
-                    self.recent_predictions.append((now, i))
-                    while len(self.recent_predictions) > 0 and now - self.recent_predictions[0][0] > 500:
-                        self.recent_predictions.popleft()
-                    votes = 0
-                    for t, j in self.recent_predictions:
-                        if j == i:
-                            votes += 1
-                    if votes * 2 >= len(self.recent_predictions):
-                        if self.state.ble_connection is not None:
-                            self.state.ble_connection.deposit.emit(i)
-                        self.preds[i].setStyleSheet(styles.PRED_HIGH)
+            if 0 <= i < len(self.state.gestures) and v > 0.9:
+                now = time_ms()
+                self.recent_predictions.append((now, i))
+                while len(self.recent_predictions) > 0 and now - self.recent_predictions[0][0] > 3000:
+                    self.recent_predictions.popleft()
+                votes = 0
+                for t, j in self.recent_predictions:
+                    if j == i:
+                        votes += 1
+                if votes * 2 >= len(self.recent_predictions):
+                    if self.state.ble_connection is not None:
+                        self.state.ble_connection.deposit.emit(i)
+                    self.preds[i].setStyleSheet(styles.PRED_HIGH)
     
     def mindrove_record_start(self):
         self.record_blocking = True
