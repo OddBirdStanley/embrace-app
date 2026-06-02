@@ -24,6 +24,8 @@ GESTURES = ["Extend", "Fist", "Flex", "Pronation", "Radial", "Rest", "Supination
 
 DEBUG_RES = os.getenv("EMBRACE_RES") == "1"
 
+GLOBAL_GARBAGE = []
+
 def time_ms():
     return int(time.time() * 1000)
 
@@ -489,8 +491,6 @@ class EmbraceApp(QWidget):
                 w.setStyleSheet(styles.PRED_DIM)
             self.mindrove_record.setEnabled(True)
             self.state.mr_connection.update.connect(self.update_mr)
-        else:
-            self.mindrove_stop()
 
     def mindrove_stop(self):
         self.mindrove_connect.setEnabled(False)
@@ -514,6 +514,7 @@ class EmbraceApp(QWidget):
         self.mindrove_connect_handle = self.mindrove_connect.clicked.connect(self.mindrove_connection_start)
         self.mindrove_connect.setText("Connect")
         self.mindrove_connect.setEnabled(True)
+        GLOBAL_GARBAGE.append(self.state.mr_connection)
         self.state.mr_connection = None
         if status == mr.CONNECT_FAILURE:
             error = QMessageBox(self)
@@ -547,8 +548,6 @@ class EmbraceApp(QWidget):
             for i in range(len(self.pred_sims)):
                 self.pred_sims[i].clicked.connect(self.arm_test_callables[i])
                 self.pred_sims[i].setEnabled(True)
-        else:
-            self.arm_dialog_stop()
     
     def arm_dialog_stop(self):
         self.arm_connect.setEnabled(False)
@@ -563,6 +562,7 @@ class EmbraceApp(QWidget):
         self.arm_connect_handle = self.arm_connect.clicked.connect(self.arm_dialog_show)
         self.arm_connect.setText("Connect")
         self.arm_connect.setEnabled(True)
+        GLOBAL_GARBAGE.append(self.state.ble_connection)
         self.state.ble_connection = None
         self.last_predicted = -1
         for t in self.pred_sims:
